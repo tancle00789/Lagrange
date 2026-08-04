@@ -1,0 +1,174 @@
+import { useEffect, useState } from "react";
+import { cancelTask, getTask, resumeTask, subscribeTaskEvents } from "../api";
+import { sourceId, type TaskStatus } from "../types";
+
+interface Props {
+  task: TaskStatus;
+  onChanged: () => void;
+}
+
+interface TimelineEntry {
+  type: string;
+  data: string;
+}
+
+const ACTIVE = new Set(["pending", "running"]);
+
+export default function TaskDetail({ task, onChanged }: Props) {
+  const [current, setCurrent] = useState<TaskStatus>(task);
+  const [events, setEvents] = useState<TimelineEntry[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setCurrent(task);
+    setEvents([]);
+    const close = subscribeTaskEvents(task.task_id, (type, data) => {
+      setEvents((prev) => [...prev.slice(-199), { type, data }]);
+      if (type !== "snapshot" && type !== "model_called") {
+        void getTask(task.task_id).then(setCurrent).catch(() => undefined);
+      }
+    });
+    return close;
+  }, [task]);
+
+  const act = async (fn: () => Promise<TaskStatus>) => {
+    setError("");
+    try {
+      setCurrent(await fn());
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const report = current.report;
+  const validChunkIds = new Set(current.knowledge_hits.map((h) => h.chunk_id));
+  for (const record of current.external_sources) {
+    validChunkIds.add(sourceId(record));
+  }
+
+  return (
+    <div>
+      <div className="panel">
+        <h2>
+          Task <span className="id">{current.task_id}</span>{" "}
+          <span className={`status ${current.status}`}>{current.status}</span>
+        </h2>
+        {(ACTIVE.has(current.status) || current.status === "paused") && (
+          <div className="actions">
+            {current.status === "paused" && (
+              <>
+                <button onClick={() => void act(() => resumeTask(current.task_id, true))}>
+                  Approve
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => void act(() => resumeTask(current.task_id, false, "rejected"))}
+                >
+                  Reject
+                </button>
+              </>
+            )}
+            {ACTIVE.has(current.status) && (
+              <button
+                className="danger"
+                onClick={() => void act(() => cancelTask(current.task_id))}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+        {error && <p className="error">{error}</p>}
+      </div>
+
+      <div className="panel">
+        <h2>Event Timeline</h2>
+        {events.length === 0 && <p className="muted">Waiting for events...</p>}
+        <ul className="timeline">
+          {events.map((entry, i) => (
+            <li key={i}>
+              <span className="etype">{entry.type}</span>
+              {entry.data.slice(0, 160)}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="panel">
+        <h2>Knowledge Hits ({current.knowledge_hits.length})</h2>
+        <ul className="hits">
+          {current.knowledge_hits.map((hit) => (
+            <li key={hit.chunk_id}>
+              <div className="meta">
+                {hit.chunk_id} · score {hit.score.toFixed(3)} · {hit.source.title}
+              </div>
+              <div className="snippet">{hit.snippet}</div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {current.external_sources.length > 0 && (
+        <div className="panel">
+          <h2>External Sources ({current.external_sources.length})</h2>
+          <ul className="hits">
+            {current.external_sources.map((record) => (
+              <li key={sourceId(record)}>
+                <div className="meta">
+                  {sourceId(record)} · {record.venue || record.source_type}
+                  {record.published ? ` · ${record.published}` : ""}
+                  {typeof record.extra.knowledge_id === "string" && (
+                    <span className="grounded-yes"> · ingested</span>
+                  )}
+                </div>
+                <div>
+                  <a href={record.url} target="_blank" rel="noreferrer">
+                    {record.title}
+                  </a>
+                  {record.authors.length > 0 && (
+                    <span className="muted"> — {record.authors.slice(0, 3).join(", ")}</span>
+                  )}
+                </div>
+                {record.abstract && <div className="snippet">{record.abstract}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {report && (
+        <div className="panel">
+          <h2>Report</h2>
+          <p>{report.answer}</p>
+          <p>
+            Grounded:{" "}
+            <span className={report.grounded ? "grounded-yes" : "grounded-no"}>
+              {report.grounded ? "yes" : "no"}
+            </span>
+            {report.dropped_citations > 0 && (
+              <span className="muted"> · {report.dropped_citations} citation(s) dropped</span>
+            )}
+          </p>
+          {report.notes.length > 0 && (
+            <p className="muted">notes: {report.notes.join("; ")}</p>
+          )}
+          <ul className="claims">
+            {report.claims.map((claim, i) => (
+              <li key={i}>
+                <div>{claim.text}</div>
+                <div className="chunk-ids">
+                  {claim.chunk_ids.map((id) => (
+                    <span key={id} style={{ color: validChunkIds.has(id) ? "#3fb27f" : "#e05656" }}>
+                      {id}{" "}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}

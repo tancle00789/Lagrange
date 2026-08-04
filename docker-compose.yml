@@ -1,0 +1,145 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pk_agent
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pk_agent"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "5432:5432"
+    networks:
+      - pk-agent-net
+
+  app:
+    build: .
+    environment:
+      PK_AGENT_DATABASE_URL: postgresql://postgres:postgres@db:5432/pk_agent
+      PK_AGENT_JWT_SECRET: dev-only-secret
+      PK_AGENT_CHECKPOINT_NS: smoke
+      PK_AGENT_MODEL_BUDGET_MAX_CALLS: "5"
+      PK_AGENT_WEKNORA_BASE_URL: http://weknora-app:8080
+      PK_AGENT_WEKNORA_API_KEY: ${PK_AGENT_WEKNORA_API_KEY:-}
+      PK_AGENT_WEKNORA_DEFAULT_KB_ID: ${PK_AGENT_WEKNORA_DEFAULT_KB_ID:-}
+      PK_AGENT_SSRF_ALLOWLIST: weknora-app,localhost,export.arxiv.org,arxiv.org,api.github.com,github.com,api.crossref.org,api.springernature.com,link.springer.com
+      PK_AGENT_OLLAMA_BASE_URL: ${PK_AGENT_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      PK_AGENT_OLLAMA_CHAT_MODEL: ${PK_AGENT_OLLAMA_CHAT_MODEL:-}
+      PK_AGENT_GITHUB_TOKEN: ${PK_AGENT_GITHUB_TOKEN:-}
+      PK_AGENT_CROSSREF_MAILTO: ${PK_AGENT_CROSSREF_MAILTO:-}
+      PK_AGENT_SPRINGER_NATURE_API_KEY: ${PK_AGENT_SPRINGER_NATURE_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - pk-agent-net
+      - weknora-net
+
+  # ---------------------------------------------------------------------------
+  # WeKnora knowledge subsystem (contained, no frontend).
+  # Data ownership stays with WeKnora: separate DB, separate volumes.
+  # pk_agent reaches it only through the HTTP API on weknora-net.
+  # ---------------------------------------------------------------------------
+  weknora-app:
+    image: production-knowledge-agent-weknora-app:latest
+    build:
+      context: ../WeKnora
+      dockerfile: docker/Dockerfile.app
+    volumes:
+      - weknora-data-files:/data/files
+      - weknora-docreader-tmp:/tmp/docreader:ro
+      - ../WeKnora/config/config.yaml:/app/config/config.yaml
+      - ../WeKnora/skills/preloaded:/app/skills/preloaded
+    environment:
+      - GIN_MODE=release
+      - DB_DRIVER=postgres
+      - DB_HOST=weknora-postgres
+      - DB_PORT=5432
+      - DB_USER=weknora
+      - DB_PASSWORD=weknora
+      - DB_NAME=weknora
+      - REDIS_ADDR=weknora-redis:6379
+      - REDIS_PASSWORD=weknora-dev-redis
+      - DOCREADER_ADDR=weknora-docreader:50051
+      - DOCREADER_TRANSPORT=grpc
+      - JWT_SECRET=weknora-dev-jwt-secret
+      - RETRIEVE_DRIVER=postgres
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-host.docker.internal}
+      - WEKNORA_TENANT_AUTO_CREATE_API_KEY=${WEKNORA_TENANT_AUTO_CREATE_API_KEY:-true}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    depends_on:
+      weknora-redis:
+        condition: service_started
+      weknora-postgres:
+        condition: service_healthy
+      weknora-docreader:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks:
+      - weknora-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  weknora-docreader:
+    # Heavy image (~4GB); reuses the published/local image when present.
+    # `docker compose build weknora-docreader` rebuilds from source if needed.
+    image: wechatopenai/weknora-docreader:latest
+    build:
+      context: ../WeKnora
+      dockerfile: docker/Dockerfile.docreader
+    expose:
+      - "50051"
+    volumes:
+      - weknora-docreader-tmp:/tmp/docreader
+    environment:
+      - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+    networks:
+      - weknora-net
+
+  weknora-postgres:
+    image: paradedb/paradedb:v0.22.2-pg17
+    environment:
+      - POSTGRES_USER=weknora
+      - POSTGRES_PASSWORD=weknora
+      - POSTGRES_DB=weknora
+    volumes:
+      - weknora-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weknora"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - weknora-net
+
+  weknora-redis:
+    image: redis:7.0-alpine
+    command: redis-server --appendonly yes --requirepass weknora-dev-redis
+    networks:
+      - weknora-net
+
+networks:
+  pk-agent-net:
+    driver: bridge
+  weknora-net:
+    driver: bridge
+
+volumes:
+  weknora-pgdata:
+  weknora-data-files:
+  weknora-docreader-tmp:
