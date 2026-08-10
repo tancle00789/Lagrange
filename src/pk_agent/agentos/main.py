@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from redis.asyncio import Redis
+from starlette.middleware.base import RequestResponseEndpoint
 
 from pk_agent.agentos.api.v1.literature import router as literature_router
+from pk_agent.agentos.api.v1.tasks import execute_job
 from pk_agent.agentos.api.v1.tasks import router as tasks_router
+from pk_agent.agentos.cancellation import (
+    CancellationCoordinator,
+    RedisCancellationCoordinator,
+)
+from pk_agent.agentos.dependencies import RateLimit, RateLimiter, RedisRateLimiter
+from pk_agent.agentos.job_queue import RedisJobQueue
+from pk_agent.agentos.task_store import InMemoryTaskStore, RedisTaskStore, TaskStore
 from pk_agent.config import Settings, get_settings
 from pk_agent.graph.checkpointer import open_checkpointer
 from pk_agent.graph.research_graph import build_research_graph
-from pk_agent.harness.bus import AgentEventBus
+from pk_agent.harness.bus import AgentEventBus, EventBus, RedisAgentEventBus
 from pk_agent.harness.ollama import OllamaModel
 from pk_agent.harness.registry import ToolRegistry, ToolRisk, ToolSpec
 from pk_agent.harness.router import FakeModel, Model, ModelRouter
@@ -25,16 +36,33 @@ from pk_agent.literature.tools import (
     make_literature_ingest_handler,
     make_literature_search_handler,
 )
+from pk_agent.observability import Observability, configure_json_logging
 from pk_agent.providers.base import KnowledgeProvider
 from pk_agent.providers.fake import FakeKnowledgeProvider
 from pk_agent.providers.weknora import WeKnoraKnowledgeProvider
 from pk_agent.providers.weknora_client import WeKnoraClient
+from pk_agent.security.jwks import JwksAuthenticator
+from pk_agent.security.sse import RedisSseTicketStore, SseTicketStore, TicketStore
 
 STATIC_DIR_CANDIDATES = [
     Path("/app/static"),
     Path(__file__).resolve().parents[3] / "frontend" / "dist",
 ]
 DEV_CORS_ORIGINS = ["http://localhost:5173"]
+
+
+def _build_task_store(settings: Settings) -> TaskStore:
+    if settings.runtime_store == "memory":
+        return InMemoryTaskStore()
+    if settings.runtime_store != "redis":
+        raise ValueError(f"unsupported runtime store: {settings.runtime_store}")
+    client = Redis.from_url(settings.redis_url, decode_responses=True)
+    return RedisTaskStore(
+        client,
+        key_prefix=settings.runtime_key_prefix,
+        task_retention_seconds=settings.task_retention_seconds,
+        idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+    )
 
 
 def _build_knowledge_provider(settings: Settings) -> KnowledgeProvider:
@@ -141,11 +169,59 @@ def create_app(
     literature_sources: dict[str, LiteratureSource] | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
+    settings.validate_runtime_security()
+    configure_json_logging(settings.log_level)
+    observability = Observability(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         checkpointer, close_checkpointer = await open_checkpointer(settings.database_url)
-        event_bus = AgentEventBus()
+        jwks_authenticator = (
+            JwksAuthenticator(
+                settings.jwt_jwks_url,
+                issuer=settings.jwt_issuer or "",
+                audience=settings.jwt_audience or "",
+                cache_seconds=settings.jwt_jwks_cache_seconds,
+            )
+            if settings.jwt_jwks_url
+            else None
+        )
+        task_store = _build_task_store(settings)
+        event_bus: EventBus
+        rate_limiter: RateLimit
+        sse_tickets: TicketStore
+        cancellation: CancellationCoordinator
+        if isinstance(task_store, RedisTaskStore):
+            await task_store.client.ping()
+            runtime_redis = task_store.client
+            event_bus = RedisAgentEventBus(runtime_redis, key_prefix=settings.runtime_key_prefix)
+            rate_limiter = RedisRateLimiter(
+                runtime_redis,
+                settings.rate_limit_rps,
+                key_prefix=settings.runtime_key_prefix,
+            )
+            sse_tickets = RedisSseTicketStore(
+                runtime_redis,
+                ttl_seconds=settings.sse_ticket_ttl_seconds,
+                key_prefix=settings.runtime_key_prefix,
+            )
+            cancellation = RedisCancellationCoordinator(
+                runtime_redis, key_prefix=settings.runtime_key_prefix
+            )
+            job_queue = RedisJobQueue(
+                runtime_redis,
+                key_prefix=settings.runtime_key_prefix,
+                concurrency=settings.worker_concurrency,
+                lease_ms=settings.worker_lease_ms,
+                block_ms=settings.worker_block_ms,
+                retry_backoff_seconds=settings.worker_retry_backoff_seconds,
+            )
+        else:
+            event_bus = AgentEventBus()
+            rate_limiter = RateLimiter(settings.rate_limit_rps)
+            sse_tickets = SseTicketStore(settings.sse_ticket_ttl_seconds)
+            cancellation = CancellationCoordinator()
+            job_queue = None
         model_router = ModelRouter()
         model_router.register("answer", _build_answer_model(settings))
         knowledge_provider = _build_knowledge_provider(settings)
@@ -157,11 +233,28 @@ def create_app(
         tool_registry = _build_tool_registry(settings, knowledge_provider, sources)
 
         app.state.settings = settings
+        app.state.observability = observability
+        app.state.jwks_authenticator = jwks_authenticator
         app.state.event_bus = event_bus
         app.state.model_router = model_router
         app.state.knowledge_provider = knowledge_provider
         app.state.literature_sources = sources
         app.state.tool_registry = tool_registry
+        app.state.sse_tickets = sse_tickets
+        app.state.rate_limiter = rate_limiter
+        app.state.cancellation = cancellation
+        app.state.task_store = task_store
+        app.state.job_queue = job_queue
+        app.state.task_runs = {}
+        app.state.shutting_down = False
+
+        def cancel_owned(task_id: str) -> None:
+            run = app.state.task_runs.get(task_id)
+            if run is not None and not run.done():
+                run.cancel()
+
+        if isinstance(cancellation, RedisCancellationCoordinator):
+            await cancellation.start(cancel_owned)
         app.state.graph = build_research_graph(
             checkpointer=checkpointer,
             model_router=model_router,
@@ -170,9 +263,18 @@ def create_app(
             knowledge_provider=knowledge_provider,
             tool_registry=tool_registry,
         )
-        app.state.tasks = {}
-        app.state.idempotency = {}
+        if job_queue is not None:
+            await job_queue.start(lambda job: execute_job(app, job))
         yield
+        app.state.shutting_down = True
+        await cancellation.aclose()
+        if job_queue is not None:
+            await job_queue.aclose()
+        active_runs = list(app.state.task_runs.values())
+        for run in active_runs:
+            run.cancel()
+        if active_runs:
+            await asyncio.gather(*active_runs, return_exceptions=True)
         for source in sources.values():
             http = getattr(source, "http", None)
             if http is not None:
@@ -180,9 +282,22 @@ def create_app(
         provider_client = getattr(knowledge_provider, "client", None)
         if provider_client is not None:
             await provider_client.aclose()
+        await task_store.aclose()
+        if jwks_authenticator is not None:
+            await jwks_authenticator.aclose()
         await close_checkpointer()
+        observability.shutdown()
 
     app = FastAPI(title="Production Knowledge Agent", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def observe_request(request: Request, call_next: RequestResponseEndpoint):
+        return await observability.http_middleware(request, call_next)
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        return observability.metrics_response()
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=DEV_CORS_ORIGINS,

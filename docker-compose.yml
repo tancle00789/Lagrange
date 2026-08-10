@@ -15,10 +15,28 @@ services:
     networks:
       - pk-agent-net
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - pk-agent-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - pk-agent-net
+
   app:
     build: .
     environment:
       PK_AGENT_DATABASE_URL: postgresql://postgres:postgres@db:5432/pk_agent
+      PK_AGENT_REDIS_URL: redis://redis:6379/0
+      PK_AGENT_RUNTIME_STORE: redis
+      PK_AGENT_WORKER_CONCURRENCY: "2"
+      PK_AGENT_WORKER_LEASE_MS: "30000"
+      PK_AGENT_METRICS_ENABLED: "true"
       PK_AGENT_JWT_SECRET: dev-only-secret
       PK_AGENT_CHECKPOINT_NS: smoke
       PK_AGENT_MODEL_BUDGET_MAX_CALLS: "5"
@@ -36,8 +54,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/app/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     networks:
       - pk-agent-net
       - weknora-net
@@ -140,6 +172,7 @@ networks:
     driver: bridge
 
 volumes:
+  pk-agent-redis-data:
   weknora-pgdata:
   weknora-data-files:
   weknora-docreader-tmp:

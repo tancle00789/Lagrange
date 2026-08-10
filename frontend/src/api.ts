@@ -84,27 +84,42 @@ export function subscribeTaskEvents(
   taskId: string,
   onEvent: (event: string, data: string) => void,
 ): () => void {
-  const source = new EventSource(
-    `/api/v1/tasks/${taskId}/events?token=${encodeURIComponent(getToken())}`,
-  );
-  const handler = (event: MessageEvent) => onEvent(event.type, event.data);
-  source.onmessage = handler;
-  for (const type of [
-    "snapshot",
-    "started",
-    "knowledge_retrieved",
-    "knowledge_degraded",
-    "external_retrieved",
-    "external_degraded",
-    "external_ingested",
-    "model_called",
-    "citation_gate",
-    "paused",
-    "completed",
-    "failed",
-    "cancelled",
-  ]) {
-    source.addEventListener(type, handler);
-  }
-  return () => source.close();
+  let source: EventSource | null = null;
+  let closed = false;
+  void request<{ ticket: string; expires_in: number }>(
+    `/api/v1/tasks/${taskId}/events/ticket`,
+    { method: "POST" },
+  )
+    .then(({ ticket }) => {
+      if (closed) return;
+      source = new EventSource(
+        `/api/v1/tasks/${taskId}/events?ticket=${encodeURIComponent(ticket)}`,
+      );
+      const handler = (event: MessageEvent) => onEvent(event.type, event.data);
+      source.onmessage = handler;
+      for (const type of [
+        "snapshot",
+        "started",
+        "knowledge_retrieved",
+        "knowledge_degraded",
+        "external_retrieved",
+        "external_degraded",
+        "external_ingested",
+        "model_called",
+        "citation_gate",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+      ]) {
+        source.addEventListener(type, handler);
+      }
+    })
+    .catch((error: unknown) => {
+      if (!closed) onEvent("failed", error instanceof Error ? error.message : String(error));
+    });
+  return () => {
+    closed = true;
+    source?.close();
+  };
 }

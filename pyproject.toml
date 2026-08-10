@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "production-knowledge-agent"
 version = "0.1.0"
-description = "Phase 1 echo runtime for a production knowledge research agent"
+description = "Production knowledge research agent with grounded internal and literature retrieval"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.115,<1",
@@ -18,9 +18,13 @@ dependencies = [
   "psycopg[binary,pool]>=3.2,<4",
   "redis>=5,<7",
   "httpx>=0.27,<1",
-  "PyJWT>=2.8,<3",
+  "PyJWT[crypto]>=2.8,<3",
   "tenacity>=8.2,<10",
   "defusedxml>=0.7.1",
+  "prometheus-client>=0.21,<1",
+  "opentelemetry-api>=1.30,<2",
+  "opentelemetry-sdk>=1.30,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
 ]
 
 [dependency-groups]
@@ -31,6 +35,8 @@ dev = [
   "mypy>=1.10,<2",
   "types-redis>=4,<5",
   "types-PyJWT>=1.7,<2",
+  "fakeredis>=2.30,<3",
+  "httpx2>=2,<3",
 ]
 
 [tool.hatch.build.targets.wheel]

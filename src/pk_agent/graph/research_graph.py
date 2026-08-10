@@ -8,8 +8,8 @@ from langgraph.graph import END, START, StateGraph
 
 from pk_agent.domain.research import Claim, Report
 from pk_agent.graph.state import ResearchState
-from pk_agent.harness.bus import AgentEventBus
-from pk_agent.harness.prompt import PromptAssembler
+from pk_agent.harness.bus import EventBus
+from pk_agent.harness.prompt import PromptAssembler, has_prompt_injection_signal
 from pk_agent.harness.registry import ToolRegistry, ToolRisk
 from pk_agent.harness.router import ModelRouter
 from pk_agent.literature.models import LiteratureRecord
@@ -68,7 +68,7 @@ def _dedupe_external(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_research_graph(
     checkpointer: Any,
     model_router: ModelRouter,
-    event_bus: AgentEventBus,
+    event_bus: EventBus,
     max_budget_calls: int,
     knowledge_provider: KnowledgeProvider,
     tool_registry: ToolRegistry | None = None,
@@ -205,6 +205,17 @@ def build_research_graph(
         external = [
             LiteratureRecord(**record) for record in state.get("external_sources", [])
         ]
+        suspicious_evidence = sum(
+            has_prompt_injection_signal(hit.snippet) for hit in hits
+        ) + sum(
+            has_prompt_injection_signal(f"{record.title}\n{record.abstract}")
+            for record in external
+        )
+        if suspicious_evidence:
+            await publish(
+                task_id,
+                {"type": "prompt_injection_detected", "evidence_items": suspicious_evidence},
+            )
         prompt = prompt_assembler.build_answer_prompt(
             state["normalized_query"], hits, external or None
         )

@@ -4,6 +4,7 @@ import time
 
 AUTH = {"Authorization": "Bearer dev:tenant-a:user-1:admin"}
 OTHER_AUTH = {"Authorization": "Bearer dev:tenant-b:user-2:admin"}
+VIEWER_AUTH = {"Authorization": "Bearer dev:tenant-a:user-3:viewer"}
 
 
 def _wait_for_completion(client, task_id: str) -> dict:
@@ -54,12 +55,50 @@ def test_requires_auth(client) -> None:
     assert response.status_code == 401
 
 
+def test_create_requires_admin_role(client) -> None:
+    response = client.post("/api/v1/tasks", headers=VIEWER_AUTH, json={"input": "x"})
+    assert response.status_code == 403
+
+
 def test_tenant_isolation(client) -> None:
     created = client.post("/api/v1/tasks", headers=AUTH, json={"input": "secret"})
     task_id = created.json()["task_id"]
 
     response = client.get(f"/api/v1/tasks/{task_id}", headers=OTHER_AUTH)
     assert response.status_code == 404
+
+
+def test_idempotency_key_is_tenant_scoped(client) -> None:
+    first = client.post(
+        "/api/v1/tasks",
+        headers={**AUTH, "Idempotency-Key": "shared-key"},
+        json={"input": "tenant a"},
+    )
+    second = client.post(
+        "/api/v1/tasks",
+        headers={**OTHER_AUTH, "Idempotency-Key": "shared-key"},
+        json={"input": "tenant b"},
+    )
+    assert first.status_code == second.status_code == 202
+    assert first.json()["task_id"] != second.json()["task_id"]
+
+
+def test_sse_ticket_is_task_bound_and_single_use(client) -> None:
+    created = client.post("/api/v1/tasks", headers=AUTH, json={"input": "events"})
+    task_id = created.json()["task_id"]
+
+    issued = client.post(f"/api/v1/tasks/{task_id}/events/ticket", headers=AUTH)
+    assert issued.status_code == 200
+    body = issued.json()
+    assert body["expires_in"] == 60
+
+    ticket = client.portal.call(client.app.state.sse_tickets.consume, body["ticket"], task_id)
+    assert ticket is not None
+    assert ticket.tenant_id == "tenant-a"
+    assert client.portal.call(client.app.state.sse_tickets.consume, body["ticket"], task_id) is None
+
+    hidden = client.post(f"/api/v1/tasks/{task_id}/events/ticket", headers=OTHER_AUTH)
+    assert hidden.status_code == 404
 
 
 def test_list_tasks_scoped_to_tenant(client) -> None:
@@ -110,9 +149,7 @@ def test_literature_search_endpoint(literature_client) -> None:
     assert body["records"][0]["source_type"] == "arxiv"
     assert body["records"][0]["external_id"] == "2401.00001"
 
-    unauthorized = literature_client.post(
-        "/api/v1/literature/search", json={"query": "kv cache"}
-    )
+    unauthorized = literature_client.post("/api/v1/literature/search", json={"query": "kv cache"})
     assert unauthorized.status_code == 401
 
     unknown_source = literature_client.post(

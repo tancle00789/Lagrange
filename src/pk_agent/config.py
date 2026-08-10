@@ -10,7 +10,24 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql://postgres:postgres@localhost:5432/pk_agent"
     redis_url: str = "redis://localhost:6379/0"
+    runtime_store: str = "memory"
+    runtime_key_prefix: str = "pk_agent"
+    task_retention_seconds: int = 604_800
+    idempotency_ttl_seconds: int = 86_400
+    worker_concurrency: int = 2
+    worker_lease_ms: int = 30_000
+    worker_block_ms: int = 1_000
+    worker_max_attempts: int = 3
+    worker_retry_backoff_seconds: float = 0.25
+    log_level: str = "INFO"
+    metrics_enabled: bool = True
+    otlp_endpoint: str | None = None
+    observability_service_name: str = "production-knowledge-agent"
     jwt_secret: str = "dev-only-secret"  # noqa: S105
+    jwt_jwks_url: str | None = None
+    jwt_issuer: str | None = None
+    jwt_audience: str | None = None
+    jwt_jwks_cache_seconds: int = 300
     checkpoint_ns: str = "dev"
     model_budget_max_calls: int = 10
     rate_limit_rps: int = 20
@@ -19,6 +36,7 @@ class Settings(BaseSettings):
         "api.crossref.org,api.springernature.com,link.springer.com"
     )
     environment: str = "dev"
+    sse_ticket_ttl_seconds: int = 60
 
     weknora_base_url: str = "http://weknora-app:8080"
     weknora_api_key: str | None = None
@@ -59,6 +77,20 @@ class Settings(BaseSettings):
             tenant, kb_id = pair.split(":", 1)
             mapping[tenant.strip()] = kb_id.strip()
         return mapping
+
+    def validate_runtime_security(self) -> None:
+        """Reject development credentials when the service is production-bound."""
+        if self.environment.lower() != "production":
+            return
+        if not self.jwt_jwks_url or not self.jwt_issuer or not self.jwt_audience:
+            raise ValueError(
+                "PK_AGENT_JWT_JWKS_URL, PK_AGENT_JWT_ISSUER and PK_AGENT_JWT_AUDIENCE "
+                "are required in production"
+            )
+        if not self.jwt_jwks_url.startswith("https://"):
+            raise ValueError("PK_AGENT_JWT_JWKS_URL must use https in production")
+        if self.runtime_store != "redis":
+            raise ValueError("PK_AGENT_RUNTIME_STORE must be redis in production")
 
 
 @lru_cache

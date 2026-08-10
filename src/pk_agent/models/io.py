@@ -15,6 +15,11 @@ class TaskCreateResponse(BaseModel):
     status: str
 
 
+class SseTicketResponse(BaseModel):
+    ticket: str
+    expires_in: int
+
+
 class TaskStatusResponse(BaseModel):
     task_id: str
     tenant_id: str
