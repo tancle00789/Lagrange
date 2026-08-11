@@ -11,6 +11,8 @@ from redis.asyncio import Redis
 from starlette.middleware.base import RequestResponseEndpoint
 
 from pk_agent.agentos.api.v1.literature import router as literature_router
+from pk_agent.agentos.api.v1.modelblocks import artifacts_router
+from pk_agent.agentos.api.v1.modelblocks import router as modelblocks_router
 from pk_agent.agentos.api.v1.tasks import execute_job
 from pk_agent.agentos.api.v1.tasks import router as tasks_router
 from pk_agent.agentos.cancellation import (
@@ -36,6 +38,17 @@ from pk_agent.literature.tools import (
     make_literature_ingest_handler,
     make_literature_search_handler,
 )
+from pk_agent.modelblocks.artifacts import (
+    ArtifactStore,
+    LocalArtifactStore,
+    MinioArtifactStore,
+)
+from pk_agent.modelblocks.broker import ModelRunBroker
+from pk_agent.modelblocks.kv_cache_sim import KvCacheSimBlock
+from pk_agent.modelblocks.registry import ModelBlockRegistry
+from pk_agent.modelblocks.sklearn_tabular import SklearnTabularBlock
+from pk_agent.modelblocks.tools import model_block_run_spec
+from pk_agent.modelblocks.torch_mlp import TorchMlpBlock
 from pk_agent.observability import Observability, configure_json_logging
 from pk_agent.providers.base import KnowledgeProvider
 from pk_agent.providers.fake import FakeKnowledgeProvider
@@ -132,6 +145,8 @@ def _build_tool_registry(
     settings: Settings,
     knowledge_provider: KnowledgeProvider,
     sources: dict[str, LiteratureSource],
+    model_run_broker: ModelRunBroker | None = None,
+    model_block_registry: ModelBlockRegistry | None = None,
 ) -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(
@@ -160,7 +175,35 @@ def _build_tool_registry(
             max_retries=0,
         )
     )
+    if model_run_broker is not None and model_block_registry is not None:
+        registry.register(
+            model_block_run_spec(
+                model_block_registry,
+                model_run_broker,
+                timeout_seconds=settings.model_block_timeout_seconds,
+            )
+        )
     return registry
+
+
+def _build_model_block_registry() -> ModelBlockRegistry:
+    registry = ModelBlockRegistry()
+    registry.register(SklearnTabularBlock())
+    registry.register(TorchMlpBlock())
+    registry.register(KvCacheSimBlock())
+    return registry
+
+
+def _build_artifact_store(settings: Settings) -> ArtifactStore:
+    if settings.minio_endpoint and settings.minio_access_key and settings.minio_secret_key:
+        return MinioArtifactStore(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            bucket=settings.minio_bucket,
+            secure=settings.minio_secure,
+        )
+    return LocalArtifactStore(settings.artifacts_local_dir)
 
 
 def create_app(
@@ -223,14 +266,31 @@ def create_app(
             cancellation = CancellationCoordinator()
             job_queue = None
         model_router = ModelRouter()
-        model_router.register("answer", _build_answer_model(settings))
+        answer_model = _build_answer_model(settings)
+        model_router.register("answer", answer_model)
+        model_router.register("plan", answer_model)
         knowledge_provider = _build_knowledge_provider(settings)
         sources = (
             literature_sources
             if literature_sources is not None
             else _build_literature_sources(settings)
         )
-        tool_registry = _build_tool_registry(settings, knowledge_provider, sources)
+        model_block_registry = _build_model_block_registry()
+        artifact_store = _build_artifact_store(settings)
+        model_run_broker: ModelRunBroker | None = None
+        if settings.model_blocks_enabled and isinstance(task_store, RedisTaskStore):
+            model_run_broker = ModelRunBroker(
+                task_store.client,
+                key_prefix=settings.runtime_key_prefix,
+                result_ttl_seconds=settings.model_run_result_ttl_seconds,
+            )
+        tool_registry = _build_tool_registry(
+            settings,
+            knowledge_provider,
+            sources,
+            model_run_broker=model_run_broker,
+            model_block_registry=model_block_registry,
+        )
 
         app.state.settings = settings
         app.state.observability = observability
@@ -240,6 +300,9 @@ def create_app(
         app.state.knowledge_provider = knowledge_provider
         app.state.literature_sources = sources
         app.state.tool_registry = tool_registry
+        app.state.model_block_registry = model_block_registry
+        app.state.model_run_broker = model_run_broker
+        app.state.artifact_store = artifact_store
         app.state.sse_tickets = sse_tickets
         app.state.rate_limiter = rate_limiter
         app.state.cancellation = cancellation
@@ -262,6 +325,10 @@ def create_app(
             max_budget_calls=settings.model_budget_max_calls,
             knowledge_provider=knowledge_provider,
             tool_registry=tool_registry,
+            model_block_registry=(
+                model_block_registry if settings.model_blocks_enabled else None
+            ),
+            model_block_max_calls=settings.model_block_max_calls,
         )
         if job_queue is not None:
             await job_queue.start(lambda job: execute_job(app, job))
@@ -306,6 +373,8 @@ def create_app(
     )
     app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["tasks"])
     app.include_router(literature_router, prefix="/api/v1/literature", tags=["literature"])
+    app.include_router(modelblocks_router, prefix="/api/v1/modelblocks", tags=["modelblocks"])
+    app.include_router(artifacts_router, prefix="/api/v1/artifacts", tags=["artifacts"])
 
     @app.get("/health")
     async def health() -> dict[str, str]:

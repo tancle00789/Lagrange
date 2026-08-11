@@ -29,7 +29,9 @@ services:
       - pk-agent-net
 
   app:
-    build: .
+    build:
+      context: .
+      target: app
     environment:
       PK_AGENT_DATABASE_URL: postgresql://postgres:postgres@db:5432/pk_agent
       PK_AGENT_REDIS_URL: redis://redis:6379/0
@@ -49,12 +51,19 @@ services:
       PK_AGENT_GITHUB_TOKEN: ${PK_AGENT_GITHUB_TOKEN:-}
       PK_AGENT_CROSSREF_MAILTO: ${PK_AGENT_CROSSREF_MAILTO:-}
       PK_AGENT_SPRINGER_NATURE_API_KEY: ${PK_AGENT_SPRINGER_NATURE_API_KEY:-}
+      PK_AGENT_MINIO_ENDPOINT: minio:9000
+      PK_AGENT_MINIO_ACCESS_KEY: ${PK_AGENT_MINIO_ACCESS_KEY:-pk-agent-minio}
+      PK_AGENT_MINIO_SECRET_KEY: ${PK_AGENT_MINIO_SECRET_KEY:-pk-agent-minio-secret}
+      PK_AGENT_MINIO_BUCKET: ${PK_AGENT_MINIO_BUCKET:-pk-agent-artifacts}
+      PK_AGENT_MODEL_BLOCK_TIMEOUT_SECONDS: ${PK_AGENT_MODEL_BLOCK_TIMEOUT_SECONDS:-900}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
@@ -73,6 +82,57 @@ services:
     networks:
       - pk-agent-net
       - weknora-net
+
+  # ---------------------------------------------------------------------------
+  # Model-block executor: trusted, pre-registered blocks (sklearn/torch/sim)
+  # running in a dedicated container with GPU passthrough and resource caps.
+  # ---------------------------------------------------------------------------
+  executor:
+    build:
+      context: .
+      target: executor
+    environment:
+      PK_AGENT_REDIS_URL: redis://redis:6379/0
+      PK_AGENT_MINIO_ENDPOINT: minio:9000
+      PK_AGENT_MINIO_ACCESS_KEY: ${PK_AGENT_MINIO_ACCESS_KEY:-pk-agent-minio}
+      PK_AGENT_MINIO_SECRET_KEY: ${PK_AGENT_MINIO_SECRET_KEY:-pk-agent-minio-secret}
+      PK_AGENT_MINIO_BUCKET: ${PK_AGENT_MINIO_BUCKET:-pk-agent-artifacts}
+      PK_AGENT_LOG_LEVEL: ${PK_AGENT_LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    cpus: 4.0
+    mem_limit: 8g
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - pk-agent-net
+
+  minio:
+    image: docker.m.daocloud.io/minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${PK_AGENT_MINIO_ACCESS_KEY:-pk-agent-minio}
+      MINIO_ROOT_PASSWORD: ${PK_AGENT_MINIO_SECRET_KEY:-pk-agent-minio-secret}
+    volumes:
+      - pk-agent-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
+    networks:
+      - pk-agent-net
 
   # ---------------------------------------------------------------------------
   # WeKnora knowledge subsystem (contained, no frontend).
@@ -173,6 +233,7 @@ networks:
 
 volumes:
   pk-agent-redis-data:
+  pk-agent-minio-data:
   weknora-pgdata:
   weknora-data-files:
   weknora-docreader-tmp:

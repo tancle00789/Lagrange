@@ -1,4 +1,4 @@
-import type { LiteratureRecord, TaskStatus } from "./types";
+import type { LiteratureRecord, ModelBlockInfo, TaskStatus } from "./types";
 
 const TOKEN_KEY = "pk_agent_token";
 
@@ -69,6 +69,26 @@ export function getTask(taskId: string): Promise<TaskStatus> {
   return request<TaskStatus>(`/api/v1/tasks/${taskId}`);
 }
 
+export function listModelBlocks(): Promise<ModelBlockInfo[]> {
+  return request<ModelBlockInfo[]>("/api/v1/modelblocks");
+}
+
+export async function downloadArtifact(artifactId: string): Promise<void> {
+  const response = await fetch(`/api/v1/artifacts/${artifactId}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status}: artifact download failed`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = artifactId.split("/").pop() ?? "artifact";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function resumeTask(taskId: string, approved: boolean, note?: string): Promise<TaskStatus> {
   return request<TaskStatus>(`/api/v1/tasks/${taskId}/resume`, {
     method: "POST",
@@ -106,6 +126,9 @@ export function subscribeTaskEvents(
         "external_degraded",
         "external_ingested",
         "model_called",
+        "model_calls_planned",
+        "model_run_completed",
+        "model_run_failed",
         "citation_gate",
         "paused",
         "completed",

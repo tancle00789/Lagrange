@@ -14,7 +14,7 @@ CREATE_RESPONSE=$(curl -fsS -X POST "$BASE_URL/api/v1/tasks" \
 
 TASK_ID=$(python -c 'import sys,json; print(json.load(sys.stdin)["task_id"])' <<<"$CREATE_RESPONSE")
 
-for _ in $(seq 1 30); do
+for _ in $(seq 1 120); do
   STATUS_RESPONSE=$(curl -fsS "$BASE_URL/api/v1/tasks/$TASK_ID" -H "Authorization: Bearer $TOKEN")
   STATUS=$(python -c 'import sys,json; print(json.load(sys.stdin)["status"])' <<<"$STATUS_RESPONSE")
   if [[ "$STATUS" == "completed" ]]; then

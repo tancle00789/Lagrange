@@ -13,6 +13,8 @@ from pk_agent.harness.prompt import PromptAssembler, has_prompt_injection_signal
 from pk_agent.harness.registry import ToolRegistry, ToolRisk
 from pk_agent.harness.router import ModelRouter
 from pk_agent.literature.models import LiteratureRecord
+from pk_agent.modelblocks.registry import ModelBlockRegistry
+from pk_agent.modelblocks.tools import MODEL_BLOCK_RUN_TOOL
 from pk_agent.providers.base import KnowledgeProvider
 from pk_agent.providers.contract import KnowledgeHit
 from pk_agent.providers.errors import KnowledgeTimeout, KnowledgeUnavailable
@@ -24,16 +26,34 @@ EXTERNAL_MAX_SOURCES = 8
 INGEST_MAX_RECORDS = 2
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_model_noise(raw: str) -> str:
+    """Remove reasoning traces and code fences from model output."""
+    return _FENCE_RE.sub("", _THINK_RE.sub("", raw).strip()).strip()
+
+
+def _load_json_object(text: str) -> dict[str, Any] | None:
+    """Parse a JSON object, tolerating prose around the outermost braces."""
+    try:
+        body = json.loads(text)
+    except ValueError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            return None
+        try:
+            body = json.loads(text[start : end + 1])
+        except ValueError:
+            return None
+    return body if isinstance(body, dict) else None
 
 
 def _parse_model_output(raw: str) -> tuple[str, list[Claim]]:
     """Defensively parse the model's JSON answer; fall back to plain text."""
-    text = _FENCE_RE.sub("", raw.strip()).strip()
-    try:
-        body = json.loads(text)
-    except ValueError:
-        return raw.strip(), []
-    if not isinstance(body, dict):
+    text = _strip_model_noise(raw)
+    body = _load_json_object(text)
+    if body is None:
         return raw.strip(), []
     answer = str(body.get("answer") or "").strip() or raw.strip()
     claims: list[Claim] = []
@@ -46,6 +66,26 @@ def _parse_model_output(raw: str) -> tuple[str, list[Claim]]:
         chunk_ids = [str(cid) for cid in item.get("chunk_ids") or [] if cid]
         claims.append(Claim(text=claim_text, chunk_ids=chunk_ids))
     return answer, claims
+
+
+def _parse_model_plan(raw: str) -> list[dict[str, Any]]:
+    """Defensively parse the planner's JSON; return [] on any malformed output."""
+    text = _strip_model_noise(raw)
+    body = _load_json_object(text)
+    if body is None:
+        return []
+    calls = body.get("model_calls")
+    if not isinstance(calls, list):
+        return []
+    parsed: list[dict[str, Any]] = []
+    for item in calls:
+        if not isinstance(item, dict):
+            continue
+        block_name = item.get("block_name")
+        params = item.get("params")
+        if isinstance(block_name, str) and block_name and isinstance(params, dict):
+            parsed.append({"block_name": block_name, "params": params})
+    return parsed
 
 
 def _dedupe_external(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -72,6 +112,8 @@ def build_research_graph(
     max_budget_calls: int,
     knowledge_provider: KnowledgeProvider,
     tool_registry: ToolRegistry | None = None,
+    model_block_registry: ModelBlockRegistry | None = None,
+    model_block_max_calls: int = 2,
 ):
     prompt_assembler = PromptAssembler()
 
@@ -107,9 +149,9 @@ def build_research_graph(
 
     def route_after_internal(state: ResearchState) -> str:
         if not state.get("allow_external") or tool_registry is None:
-            return "generate_grounded_answer"
+            return "plan_model_calls"
         if len(state.get("knowledge_hits", [])) >= EXTERNAL_MIN_HITS:
-            return "generate_grounded_answer"
+            return "plan_model_calls"
         return "retrieve_external"
 
     async def retrieve_external_node(state: ResearchState) -> ResearchState:
@@ -194,6 +236,127 @@ def build_research_graph(
             update["external_error"] = note
         return update
 
+    async def plan_model_calls_node(state: ResearchState) -> ResearchState:
+        task_id = state["task_id"]
+        if model_block_registry is None or tool_registry is None:
+            return {"model_calls": []}
+        budget_calls = state.get("budget_calls", 0)
+        if budget_calls >= max_budget_calls:
+            return {"model_calls": []}
+
+        prompt = prompt_assembler.build_plan_prompt(
+            state["normalized_query"],
+            model_block_registry.catalog_summary_json(),
+            model_block_max_calls,
+        )
+        try:
+            raw = await model_router.generate(prompt, capability="plan")
+        except KeyError:
+            # No planner model registered; planning is an optional enhancement.
+            return {"model_calls": []}
+        await publish(task_id, {"type": "model_called", "capability": "plan"})
+
+        rejected: list[str] = []
+        validated: list[dict[str, Any]] = []
+        for call in _parse_model_plan(raw):
+            if len(validated) >= model_block_max_calls:
+                rejected.append(f"{call['block_name']}: over max calls")
+                continue
+            _, error = model_block_registry.validate_params(
+                call["block_name"], call["params"]
+            )
+            if error is not None:
+                rejected.append(error)
+                continue
+            validated.append(call)
+
+        await publish(
+            task_id,
+            {
+                "type": "model_calls_planned",
+                "calls": len(validated),
+                "rejected": len(rejected),
+            },
+        )
+        update: ResearchState = {
+            "model_calls": validated,
+            "budget_calls": budget_calls + 1,
+        }
+        if rejected:
+            update["model_error"] = "; ".join(rejected)
+        return update
+
+    async def run_model_blocks_node(state: ResearchState) -> ResearchState:
+        task_id = state["task_id"]
+        calls = state.get("model_calls") or []
+        if not calls or tool_registry is None:
+            return {"model_runs": []}
+
+        runs: list[dict[str, Any]] = []
+        failures: list[str] = []
+        for call in calls:
+            result = await tool_registry.call(
+                MODEL_BLOCK_RUN_TOOL,
+                {
+                    "block_name": call["block_name"],
+                    "params": call["params"],
+                    "tenant_id": state["tenant_id"],
+                    "task_id": task_id,
+                },
+                max_risk=ToolRisk.L2,
+            )
+            if result.ok and isinstance(result.data, dict):
+                run = {
+                    "run_id": str(result.data.get("run_id", "")),
+                    "block_name": call["block_name"],
+                    "status": str(result.data.get("status", "failed")),
+                    "metrics": result.data.get("metrics") or {},
+                    "artifact_ids": result.data.get("artifact_ids") or [],
+                    "error": result.data.get("error"),
+                }
+            else:
+                run = {
+                    "run_id": "",
+                    "block_name": call["block_name"],
+                    "status": "failed",
+                    "metrics": {},
+                    "artifact_ids": [],
+                    "error": result.error_message or "model_block_run failed",
+                }
+            runs.append(run)
+            if run["status"] == "completed":
+                await publish(
+                    task_id,
+                    {
+                        "type": "model_run_completed",
+                        "block_name": run["block_name"],
+                        "run_id": run["run_id"],
+                    },
+                )
+            else:
+                await publish(
+                    task_id,
+                    {
+                        "type": "model_run_failed",
+                        "block_name": run["block_name"],
+                        "reason": run["error"],
+                    },
+                )
+                failures.append(f"{run['block_name']}: {run['error']}")
+
+        # ADR 006 spirit: a failed block run degrades to a note; the task
+        # continues to answer generation with whatever succeeded.
+        update: ResearchState = {
+            "model_runs": runs,
+            "budget_calls": state.get("budget_calls", 0) + len(calls),
+        }
+        prior_error = state.get("model_error")
+        if failures:
+            update["model_error"] = "; ".join(
+                [prior_error, *failures] if prior_error else failures
+            )
+        return update
+
     async def generate_grounded_answer_node(state: ResearchState) -> ResearchState:
         task_id = state["task_id"]
         budget_calls = state.get("budget_calls", 0)
@@ -216,8 +379,16 @@ def build_research_graph(
                 task_id,
                 {"type": "prompt_injection_detected", "evidence_items": suspicious_evidence},
             )
+        completed_runs = [
+            run
+            for run in state.get("model_runs", [])
+            if run.get("status") == "completed"
+        ]
         prompt = prompt_assembler.build_answer_prompt(
-            state["normalized_query"], hits, external or None
+            state["normalized_query"],
+            hits,
+            external or None,
+            simulations=completed_runs or None,
         )
         raw = await model_router.generate(prompt, capability="answer")
         await publish(task_id, {"type": "model_called", "capability": "answer"})
@@ -315,6 +486,8 @@ def build_research_graph(
     graph.add_node("retrieve_internal", retrieve_internal_node)
     graph.add_node("retrieve_external", retrieve_external_node)
     graph.add_node("ingest_external", ingest_external_node)
+    graph.add_node("plan_model_calls", plan_model_calls_node)
+    graph.add_node("run_model_blocks", run_model_blocks_node)
     graph.add_node("generate_grounded_answer", generate_grounded_answer_node)
     graph.add_node("citation_gate", citation_gate_node)
     graph.add_node("finalize", finalize_node)
@@ -323,10 +496,12 @@ def build_research_graph(
     graph.add_conditional_edges(
         "retrieve_internal",
         route_after_internal,
-        ["retrieve_external", "generate_grounded_answer"],
+        ["retrieve_external", "plan_model_calls"],
     )
     graph.add_edge("retrieve_external", "ingest_external")
-    graph.add_edge("ingest_external", "generate_grounded_answer")
+    graph.add_edge("ingest_external", "plan_model_calls")
+    graph.add_edge("plan_model_calls", "run_model_blocks")
+    graph.add_edge("run_model_blocks", "generate_grounded_answer")
     graph.add_edge("generate_grounded_answer", "citation_gate")
     graph.add_edge("citation_gate", "finalize")
     graph.add_edge("finalize", END)

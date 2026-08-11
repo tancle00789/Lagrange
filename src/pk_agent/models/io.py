@@ -28,6 +28,7 @@ class TaskStatusResponse(BaseModel):
     report: dict | None = None
     knowledge_hits: list[dict] = Field(default_factory=list)
     external_sources: list[dict] = Field(default_factory=list)
+    model_runs: list[dict] = Field(default_factory=list)
     messages: list[dict] = Field(default_factory=list)
 
 

@@ -63,6 +63,17 @@ class Settings(BaseSettings):
     literature_abstract_max_chars: int = 800
     literature_pdf_max_bytes: int = 25_000_000
 
+    model_blocks_enabled: bool = True
+    model_block_max_calls: int = 2
+    model_block_timeout_seconds: int = 900
+    model_run_result_ttl_seconds: int = 3600
+    minio_endpoint: str | None = None
+    minio_access_key: str | None = None
+    minio_secret_key: str | None = None
+    minio_bucket: str = "pk-agent-artifacts"
+    minio_secure: bool = False
+    artifacts_local_dir: str = ".artifacts"
+
     @property
     def ssrf_allowlist_hosts(self) -> set[str]:
         return {item.strip() for item in self.ssrf_allowlist.split(",") if item.strip()}

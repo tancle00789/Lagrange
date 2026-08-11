@@ -10,3 +10,4 @@ frontend/test-results/
 frontend/playwright-report/
 .env
 *.egg-info/
+.artifacts/

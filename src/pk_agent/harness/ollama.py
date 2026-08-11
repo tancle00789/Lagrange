@@ -38,6 +38,10 @@ class OllamaModel:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            # Structured-output consumers parse the raw content; reasoning
+            # traces (qwen3 etc.) must not leak into it. Ignored by models
+            # without thinking support.
+            "think": False,
         }
         last_error: Exception | None = None
         for attempt in (1, 2):

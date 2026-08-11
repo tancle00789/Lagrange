@@ -168,6 +168,32 @@
 - The metrics endpoint is explicitly an internal deployment surface and must be
   restricted by network or ingress policy.
 
+## Phase 11 controls (model-block subsystem, Phase 5′)
+
+- The LLM planner can only name pre-registered blocks; every planned call is
+  schema-gated (registered block + Pydantic params, `extra="forbid"`, ≤2
+  calls), and the tool handler re-validates server-side. The LLM output is
+  treated as untrusted input to a validator, never as executable intent.
+- `model_block_run` is an L2 tool with `max_retries=0`: a timed-out run has
+  executor side effects (artifacts) and is never silently duplicated.
+- Blocks are trusted, pre-registered code — there is no user-supplied-code
+  path. Container-level limits (`cpus`, `mem_limit`, GPU reservation, 50%
+  CUDA memory cap in the torch block) bound the blast radius. Per-block
+  `max_runtime_seconds` is enforced via `asyncio.wait_for` in the executor.
+- Params schemas bound all workload dimensions (rows/features/epochs/layers/
+  context length), so the LLM cannot request unbounded compute.
+- Artifacts are stored under `{tenant_id}/{task_id}/...`; the download
+  endpoint enforces the tenant prefix and rejects traversal (`..`), and the
+  local store resolves paths against its root. Graph State and checkpoints
+  hold only artifact ids and small metrics — never binary payloads.
+- MinIO credentials are env-injected secrets; they are never logged and the
+  broker/executor log only run_id, block name, tenant, and duration.
+- The "Simulation results" prompt section contains only system-generated
+  metrics (no untrusted text), so executor output cannot become an injection
+  vector into the answer model; failed runs are excluded from the prompt.
+- The Redis stream/hashes are internal-only; no external network access is
+  required by the executor beyond artifact storage.
+
 ## Known gaps before production
 - Extend approval flow to tool level: L3 external-write tools currently
   require task-level opt-in flags, not per-call HITL interrupts.

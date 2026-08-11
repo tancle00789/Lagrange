@@ -22,4 +22,7 @@ class ResearchState(TypedDict, total=False):
     external_sources: list[dict[str, Any]]
     external_error: str
     retrieval_rounds: int
+    model_calls: list[dict[str, Any]]
+    model_runs: list[dict[str, Any]]
+    model_error: str
     messages: Annotated[list[dict[str, Any]], operator.add]

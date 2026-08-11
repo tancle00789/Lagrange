@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { cancelTask, getTask, resumeTask, subscribeTaskEvents } from "../api";
+import { cancelTask, downloadArtifact, getTask, resumeTask, subscribeTaskEvents } from "../api";
 import { sourceId, type TaskStatus } from "../types";
 
 interface Props {
@@ -131,6 +131,46 @@ export default function TaskDetail({ task, onChanged }: Props) {
                   )}
                 </div>
                 {record.abstract && <div className="snippet">{record.abstract}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {current.model_runs.length > 0 && (
+        <div className="panel">
+          <h2>Model Runs ({current.model_runs.length})</h2>
+          <ul className="hits">
+            {current.model_runs.map((run, i) => (
+              <li key={run.run_id || i}>
+                <div className="meta">
+                  {run.block_name} ·{" "}
+                  <span className={run.status === "completed" ? "grounded-yes" : "grounded-no"}>
+                    {run.status}
+                  </span>
+                  {run.run_id && <span className="muted"> · {run.run_id.slice(0, 12)}</span>}
+                </div>
+                {run.error && <div className="error">{run.error}</div>}
+                {Object.keys(run.metrics).length > 0 && (
+                  <div className="snippet">
+                    {Object.entries(run.metrics)
+                      .map(([key, value]) => `${key}=${Number(value.toFixed(4))}`)
+                      .join(" · ")}
+                  </div>
+                )}
+                {run.artifact_ids.length > 0 && (
+                  <div className="actions">
+                    {run.artifact_ids.map((id) => (
+                      <button
+                        key={id}
+                        className="secondary"
+                        onClick={() => void downloadArtifact(id).catch(() => undefined)}
+                      >
+                        {id.split("/").pop()}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

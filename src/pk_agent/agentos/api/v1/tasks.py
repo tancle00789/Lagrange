@@ -33,6 +33,7 @@ def _record_response(record: dict[str, Any]) -> TaskStatusResponse:
         report=record.get("report"),
         knowledge_hits=record.get("knowledge_hits", []),
         external_sources=record.get("external_sources", []),
+        model_runs=record.get("model_runs", []),
         messages=record.get("messages", []),
     )
 
@@ -106,6 +107,7 @@ async def _execute_job(app: Any, job: JobEnvelope) -> None:
                     "report": result.get("report"),
                     "knowledge_hits": result.get("knowledge_hits", []),
                     "external_sources": result.get("external_sources", []),
+                    "model_runs": result.get("model_runs", []),
                     "messages": result.get("messages", []),
                 },
                 expected_statuses={"running"},
@@ -171,6 +173,7 @@ async def create_task(
         "report": None,
         "knowledge_hits": [],
         "external_sources": [],
+        "model_runs": [],
         "messages": [],
         "attempts": 0,
         "created_at": time.time(),

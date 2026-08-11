@@ -25,7 +25,11 @@ dependencies = [
   "opentelemetry-api>=1.30,<2",
   "opentelemetry-sdk>=1.30,<2",
   "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+  "minio>=7.2,<8",
 ]
+
+[project.scripts]
+pk-agent-executor = "pk_agent.executor_main:main"
 
 [dependency-groups]
 dev = [
@@ -37,6 +41,13 @@ dev = [
   "types-PyJWT>=1.7,<2",
   "fakeredis>=2.30,<3",
   "httpx2>=2,<3",
+  "numpy>=1.26,<3",
+  "scikit-learn>=1.5,<2",
+]
+executor = [
+  "numpy>=1.26,<3",
+  "scikit-learn>=1.5,<2",
+  "torch>=2.4,<3",
 ]
 
 [tool.hatch.build.targets.wheel]

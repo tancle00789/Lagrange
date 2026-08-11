@@ -43,6 +43,25 @@ export interface Report {
   notes: string[];
 }
 
+export interface ModelRun {
+  run_id: string;
+  block_name: string;
+  status: string;
+  metrics: Record<string, number>;
+  artifact_ids: string[];
+  error: string | null;
+}
+
+export interface ModelBlockInfo {
+  name: string;
+  version: string;
+  description: string;
+  kind: string;
+  gpu_required: boolean;
+  max_runtime_seconds: number;
+  params_schema: Record<string, unknown>;
+}
+
 export interface TaskStatus {
   task_id: string;
   tenant_id: string;
@@ -51,6 +70,7 @@ export interface TaskStatus {
   report: Report | null;
   knowledge_hits: KnowledgeHit[];
   external_sources: LiteratureRecord[];
+  model_runs: ModelRun[];
   messages: { role: string; content: string }[];
 }
 
