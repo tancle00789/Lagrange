@@ -138,10 +138,3 @@ class ToolRegistry:
         assert last_error is not None
         return last_error
 
-
-@dataclass
-class SkillRegistry:
-    _skills: dict[str, str] = field(default_factory=dict)
-
-    def register(self, name: str, instructions: str) -> None:
-        self._skills[name] = instructions

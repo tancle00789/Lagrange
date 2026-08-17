@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -9,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from pk_agent.domain.research import Claim, Report
 from pk_agent.graph.state import ResearchState
 from pk_agent.harness.bus import EventBus
+from pk_agent.harness.parse import load_json_object, strip_model_noise
 from pk_agent.harness.prompt import PromptAssembler, has_prompt_injection_signal
 from pk_agent.harness.registry import ToolRegistry, ToolRisk
 from pk_agent.harness.router import ModelRouter
@@ -18,6 +17,8 @@ from pk_agent.modelblocks.tools import MODEL_BLOCK_RUN_TOOL
 from pk_agent.providers.base import KnowledgeProvider
 from pk_agent.providers.contract import KnowledgeHit
 from pk_agent.providers.errors import KnowledgeTimeout, KnowledgeUnavailable
+from pk_agent.skills.prompts import format_approved_procedures
+from pk_agent.skills.registry import SkillRegistry
 
 CLAIM_TEXT_MAX_CHARS = 300
 QUERY_MAX_CHARS = 1000
@@ -25,34 +26,11 @@ EXTERNAL_MIN_HITS = 3
 EXTERNAL_MAX_SOURCES = 8
 INGEST_MAX_RECORDS = 2
 
-_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-
-def _strip_model_noise(raw: str) -> str:
-    """Remove reasoning traces and code fences from model output."""
-    return _FENCE_RE.sub("", _THINK_RE.sub("", raw).strip()).strip()
-
-
-def _load_json_object(text: str) -> dict[str, Any] | None:
-    """Parse a JSON object, tolerating prose around the outermost braces."""
-    try:
-        body = json.loads(text)
-    except ValueError:
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end <= start:
-            return None
-        try:
-            body = json.loads(text[start : end + 1])
-        except ValueError:
-            return None
-    return body if isinstance(body, dict) else None
-
 
 def _parse_model_output(raw: str) -> tuple[str, list[Claim]]:
     """Defensively parse the model's JSON answer; fall back to plain text."""
-    text = _strip_model_noise(raw)
-    body = _load_json_object(text)
+    text = strip_model_noise(raw)
+    body = load_json_object(text)
     if body is None:
         return raw.strip(), []
     answer = str(body.get("answer") or "").strip() or raw.strip()
@@ -70,8 +48,8 @@ def _parse_model_output(raw: str) -> tuple[str, list[Claim]]:
 
 def _parse_model_plan(raw: str) -> list[dict[str, Any]]:
     """Defensively parse the planner's JSON; return [] on any malformed output."""
-    text = _strip_model_noise(raw)
-    body = _load_json_object(text)
+    text = strip_model_noise(raw)
+    body = load_json_object(text)
     if body is None:
         return []
     calls = body.get("model_calls")
@@ -114,6 +92,7 @@ def build_research_graph(
     tool_registry: ToolRegistry | None = None,
     model_block_registry: ModelBlockRegistry | None = None,
     model_block_max_calls: int = 2,
+    skill_registry: SkillRegistry | None = None,
 ):
     prompt_assembler = PromptAssembler()
 
@@ -131,6 +110,24 @@ def build_research_graph(
             "normalized_query": query,
             "messages": [{"role": "system", "content": "research graph initialized"}],
         }
+
+    async def match_skills_node(state: ResearchState) -> ResearchState:
+        """Deterministic skill matching — no LLM, no budget cost.
+
+        Only approved skills are visible (the registry holds nothing else).
+        State stores ids only; records are re-read from the in-memory
+        registry at prompt-build time so state stays small (ADR 002).
+        """
+        task_id = state["task_id"]
+        if skill_registry is None:
+            return {"matched_skill_ids": []}
+        matched = skill_registry.match(state["normalized_query"])
+        matched_ids = [record.skill_id for record in matched]
+        if matched_ids:
+            await publish(
+                task_id, {"type": "skills_matched", "skill_ids": matched_ids}
+            )
+        return {"matched_skill_ids": matched_ids}
 
     async def retrieve_internal_node(state: ResearchState) -> ResearchState:
         task_id = state["task_id"]
@@ -384,11 +381,21 @@ def build_research_graph(
             for run in state.get("model_runs", [])
             if run.get("status") == "completed"
         ]
+        procedures_section: str | None = None
+        if skill_registry is not None:
+            matched_records = [
+                record
+                for skill_id in state.get("matched_skill_ids", [])
+                if (record := skill_registry.get(skill_id)) is not None
+            ]
+            if matched_records:
+                procedures_section = format_approved_procedures(matched_records)
         prompt = prompt_assembler.build_answer_prompt(
             state["normalized_query"],
             hits,
             external or None,
             simulations=completed_runs or None,
+            procedures_section=procedures_section,
         )
         raw = await model_router.generate(prompt, capability="answer")
         await publish(task_id, {"type": "model_called", "capability": "answer"})
@@ -483,6 +490,7 @@ def build_research_graph(
 
     graph = StateGraph(ResearchState)
     graph.add_node("normalize", normalize_node)
+    graph.add_node("match_skills", match_skills_node)
     graph.add_node("retrieve_internal", retrieve_internal_node)
     graph.add_node("retrieve_external", retrieve_external_node)
     graph.add_node("ingest_external", ingest_external_node)
@@ -492,7 +500,8 @@ def build_research_graph(
     graph.add_node("citation_gate", citation_gate_node)
     graph.add_node("finalize", finalize_node)
     graph.add_edge(START, "normalize")
-    graph.add_edge("normalize", "retrieve_internal")
+    graph.add_edge("normalize", "match_skills")
+    graph.add_edge("match_skills", "retrieve_internal")
     graph.add_conditional_edges(
         "retrieve_internal",
         route_after_internal,

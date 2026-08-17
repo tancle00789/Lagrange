@@ -25,4 +25,5 @@ class ResearchState(TypedDict, total=False):
     model_calls: list[dict[str, Any]]
     model_runs: list[dict[str, Any]]
     model_error: str
+    matched_skill_ids: list[str]
     messages: Annotated[list[dict[str, Any]], operator.add]

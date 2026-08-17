@@ -13,6 +13,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from pk_agent.agentos.api.v1.literature import router as literature_router
 from pk_agent.agentos.api.v1.modelblocks import artifacts_router
 from pk_agent.agentos.api.v1.modelblocks import router as modelblocks_router
+from pk_agent.agentos.api.v1.skills import router as skills_router
 from pk_agent.agentos.api.v1.tasks import execute_job
 from pk_agent.agentos.api.v1.tasks import router as tasks_router
 from pk_agent.agentos.cancellation import (
@@ -56,6 +57,8 @@ from pk_agent.providers.weknora import WeKnoraKnowledgeProvider
 from pk_agent.providers.weknora_client import WeKnoraClient
 from pk_agent.security.jwks import JwksAuthenticator
 from pk_agent.security.sse import RedisSseTicketStore, SseTicketStore, TicketStore
+from pk_agent.skills.registry import SkillRegistry
+from pk_agent.skills.store import InMemorySkillStore, PgSkillStore, SkillStore
 
 STATIC_DIR_CANDIDATES = [
     Path("/app/static"),
@@ -269,6 +272,17 @@ def create_app(
         answer_model = _build_answer_model(settings)
         model_router.register("answer", answer_model)
         model_router.register("plan", answer_model)
+        # Distillation and eval-judging reuse the chat model; a dedicated
+        # model can be swapped in later without touching call sites.
+        model_router.register("distill", answer_model)
+        model_router.register("judge", answer_model)
+        skill_store: SkillStore
+        if settings.database_url.startswith("postgres"):
+            skill_store = await PgSkillStore.open(settings.database_url)
+        else:
+            skill_store = InMemorySkillStore()
+        skill_registry = SkillRegistry(skill_store)
+        await skill_registry.load_approved()
         knowledge_provider = _build_knowledge_provider(settings)
         sources = (
             literature_sources
@@ -308,6 +322,8 @@ def create_app(
         app.state.cancellation = cancellation
         app.state.task_store = task_store
         app.state.job_queue = job_queue
+        app.state.skill_store = skill_store
+        app.state.skill_registry = skill_registry
         app.state.task_runs = {}
         app.state.shutting_down = False
 
@@ -329,6 +345,7 @@ def create_app(
                 model_block_registry if settings.model_blocks_enabled else None
             ),
             model_block_max_calls=settings.model_block_max_calls,
+            skill_registry=skill_registry,
         )
         if job_queue is not None:
             await job_queue.start(lambda job: execute_job(app, job))
@@ -350,6 +367,7 @@ def create_app(
         if provider_client is not None:
             await provider_client.aclose()
         await task_store.aclose()
+        await skill_store.close()
         if jwks_authenticator is not None:
             await jwks_authenticator.aclose()
         await close_checkpointer()
@@ -375,6 +393,7 @@ def create_app(
     app.include_router(literature_router, prefix="/api/v1/literature", tags=["literature"])
     app.include_router(modelblocks_router, prefix="/api/v1/modelblocks", tags=["modelblocks"])
     app.include_router(artifacts_router, prefix="/api/v1/artifacts", tags=["artifacts"])
+    app.include_router(skills_router, prefix="/api/v1/skills", tags=["skills"])
 
     @app.get("/health")
     async def health() -> dict[str, str]:

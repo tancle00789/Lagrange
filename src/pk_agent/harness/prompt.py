@@ -78,6 +78,7 @@ class PromptAssembler:
         hits: list[KnowledgeHit],
         external: list[LiteratureRecord] | None = None,
         simulations: list[dict[str, Any]] | None = None,
+        procedures_section: str | None = None,
     ) -> str:
         if hits:
             internal = "\n".join(
@@ -138,6 +139,12 @@ class PromptAssembler:
                 "Simulation results JSONL (system-generated, trusted — you may cite "
                 "these numbers directly in the answer):\n" + sim_block
             )
+
+        if procedures_section:
+            # Pre-formatted by skills.prompts.format_approved_procedures; the
+            # procedures are human-approved and treated as trusted guidance,
+            # never as evidence.
+            sections.append(procedures_section)
 
         return (
             f"{ANSWER_FORMAT_INSTRUCTION}\n\n"
