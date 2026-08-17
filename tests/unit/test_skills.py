@@ -193,15 +193,25 @@ async def test_distill_returns_candidate_record() -> None:
     response = json.dumps(
         {
             "worth_saving": True,
-            "skill_id": "kv-cache-compare",
+            "skill_id": "kv_cache_compare",  # underscores get normalized
             "name": "Compare KV-cache compression",
             "description": "desc",
             "trigger_conditions": [{"keywords": ["kv cache"], "priority": 1}],
             "procedure": "steps",
             "required_tools": ["model_block_run"],
+            "eval_cases": [
+                {
+                    "case_id": "case-1",
+                    "query": "compare kv cache ratios",
+                    "expected_answer_contains": ["steps"],
+                    "expect_skill_matched": "something-the-model-invented",
+                },
+                {"query": ""},  # malformed: dropped
+                "not-a-dict",  # malformed: dropped
+            ],
         }
     )
-    record = await distill_candidate_record(
+    distilled = await distill_candidate_record(
         {"input": "q", "result": "a"},
         _router(response),
         available_tools=["model_block_run", "literature_search"],
@@ -209,10 +219,16 @@ async def test_distill_returns_candidate_record() -> None:
         existing_versions=["1.0.0"],
         source_task_id="task-1",
     )
-    assert record is not None
+    assert distilled is not None
+    record, eval_cases = distilled
     assert record.status == "candidate"
+    assert record.skill_id == "kv-cache-compare"  # normalized to dashes
     assert record.version == "1.1.0"
     assert record.source_task_ids == ["task-1"]
+    # One valid case survives, pinned to the actual skill id.
+    assert len(eval_cases) == 1
+    assert eval_cases[0].expect_skill_matched == "kv-cache-compare"
+    assert eval_cases[0].expected_answer_contains == ["steps"]
 
 
 async def test_distill_not_worth_saving_returns_none() -> None:
@@ -258,7 +274,7 @@ async def test_distill_rejects_unknown_tools_and_bad_json() -> None:
         )
 
     bad_schema = json.dumps(
-        {"worth_saving": True, "skill_id": "BAD ID", "name": "n", "procedure": "s"}
+        {"worth_saving": True, "skill_id": "!!!", "name": "n", "procedure": "s"}
     )
     with pytest.raises(DistillError, match="schema validation"):
         await distill_candidate_record(

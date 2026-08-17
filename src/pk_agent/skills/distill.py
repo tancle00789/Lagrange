@@ -7,12 +7,22 @@ from typing import Any
 from pk_agent.harness.parse import load_json_object, strip_model_noise
 from pk_agent.harness.prompt import sanitize_untrusted_text
 from pk_agent.harness.router import ModelRouter
-from pk_agent.skills.models import SkillRecord, TriggerCondition
+from pk_agent.skills.models import EvalCase, SkillRecord, TriggerCondition
 from pk_agent.skills.prompts import build_distill_prompt
 
 
 class DistillError(Exception):
     """Distillation could not produce a valid candidate."""
+
+
+def normalize_skill_id(raw: str) -> str:
+    """Coerce model-proposed ids into the lowercase-dash shape.
+
+    Local models reliably answer ``kv_cache_simulation`` (underscores, after
+    the block names in the task record) no matter how the format instruction
+    is phrased; normalizing is cheaper than rejecting.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
 
 
 def summarize_task_record(record: dict[str, Any], *, max_chars: int = 4000) -> str:
@@ -54,12 +64,15 @@ async def distill_candidate_record(
     existing_skill_ids: list[str],
     existing_versions: list[str],
     source_task_id: str,
-) -> SkillRecord | None:
+) -> tuple[SkillRecord, list[EvalCase]] | None:
     """Distill a candidate skill from a completed task.
 
     Returns None when the model judges the task not generalizable. The
     returned record is ALWAYS status="candidate" — this code path has no
-    way to produce an approved skill.
+    way to produce an approved skill. The accompanying eval cases are
+    model-suggested starting points for the offline evaluator; every case
+    is pinned to this skill (expect_skill_matched) regardless of what the
+    model claimed.
     """
     prompt = build_distill_prompt(
         summarize_task_record(task_record), available_tools, existing_skill_ids
@@ -83,7 +96,7 @@ async def distill_candidate_record(
             if isinstance(item, dict)
         ]
         record = SkillRecord(
-            skill_id=str(body.get("skill_id") or ""),
+            skill_id=normalize_skill_id(str(body.get("skill_id") or "")),
             version=next_version(existing_versions),
             status="candidate",
             name=str(body.get("name") or "")[:200],
@@ -95,4 +108,26 @@ async def distill_candidate_record(
         )
     except ValueError as exc:
         raise DistillError(f"distill output failed schema validation: {exc}") from exc
-    return record
+
+    eval_cases: list[EvalCase] = []
+    for index, item in enumerate(body.get("eval_cases") or []):
+        if not isinstance(item, dict):
+            continue
+        try:
+            eval_cases.append(
+                EvalCase(
+                    case_id=str(item.get("case_id") or f"case-{index + 1}")[:100],
+                    query=str(item.get("query") or ""),
+                    expected_answer_contains=[
+                        str(needle)
+                        for needle in (item.get("expected_answer_contains") or [])
+                    ][:10],
+                    expect_skill_matched=record.skill_id,
+                    expect_model_blocks=[
+                        str(name) for name in (item.get("expect_model_blocks") or [])
+                    ][:5],
+                )
+            )
+        except ValueError:
+            continue  # drop malformed cases; the record stands on its own
+    return record, eval_cases[:5]

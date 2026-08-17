@@ -117,6 +117,13 @@ def test_distill_from_completed_task(client) -> None:
             # In-memory test runtime has no model-block broker, so only the
             # literature tools are registered; use one of those.
             "required_tools": ["literature_search"],
+            "eval_cases": [
+                {
+                    "case_id": "case-1",
+                    "query": "how does kv cache compression work",
+                    "expected_answer_contains": ["kv-cache procedure steps"],
+                }
+            ],
         }
     )
     client.app.state.model_router.register("distill", FakeModel(response=distill_response))
@@ -130,6 +137,8 @@ def test_distill_from_completed_task(client) -> None:
     record = body["record"]
     assert record["status"] == "candidate"
     assert record["source_task_ids"] == ["task-distill"]
+    # Suggested cases come back pinned to the distilled skill id.
+    assert body["eval_cases"][0]["expect_skill_matched"] == "kv-cache-compare"
 
     pipeline = client.get("/api/v1/skills/pipeline", headers=AUTH).json()
     assert [item["skill_id"] for item in pipeline] == ["kv-cache-compare"]

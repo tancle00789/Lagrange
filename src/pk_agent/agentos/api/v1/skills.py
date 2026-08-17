@@ -113,7 +113,7 @@ async def distill_skill(
         for record in await store.list_family(skill_id)
     ]
     try:
-        record = await distill_candidate_record(
+        distilled = await distill_candidate_record(
             task,
             request.app.state.model_router,
             available_tools=request.app.state.tool_registry.names(),
@@ -123,10 +123,17 @@ async def distill_skill(
         )
     except DistillError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if record is None:
-        return {"worth_saving": False, "record": None}
+    if distilled is None:
+        return {"worth_saving": False, "record": None, "eval_cases": []}
+    record, eval_cases = distilled
     await store.put_record(record)
-    return {"worth_saving": True, "record": _record_view(record)}
+    return {
+        "worth_saving": True,
+        "record": _record_view(record),
+        # Model-suggested cases for POST .../evaluate; each is already pinned
+        # to this skill (expect_skill_matched).
+        "eval_cases": [case.model_dump(mode="json") for case in eval_cases],
+    }
 
 
 @router.post("/{skill_id}/{version}/evaluate")

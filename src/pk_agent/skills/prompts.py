@@ -14,19 +14,29 @@ Rules:
 - trigger_conditions keywords/regexes must match future queries where this
   procedure helps. Keep them specific (3-6 keywords max).
 - required_tools may ONLY contain names from the available tools list.
-  Never invent tool names.
+  Never invent tool names. Model block names (e.g. kv_cache_sim) are NOT
+  tools — the tool that runs them is "model_block_run".
 - procedure is concise markdown (<= 1500 chars): steps the agent should
   follow when this skill is selected.
+- eval_cases: 2-4 short checks that would prove this skill works. Each
+  case's "query" must contain at least one of your trigger keywords;
+  "expected_answer_contains" must be short substrings that would appear in
+  an answer that followed your procedure (quote distinctive phrases from
+  your procedure text verbatim).
 - If the task is not generalizable, set "worth_saving" to false.
 
 Respond with STRICT JSON only, no markdown fences, no commentary:
 {"worth_saving": true|false,
- "skill_id": "<lowercase-dash-id>",
+ "skill_id": "<lowercase letters and DASHES only, never underscores>",
  "name": "<short name>",
  "description": "<one sentence>",
  "trigger_conditions": [{"keywords": ["..."], "regex_patterns": [], "priority": 0}],
  "procedure": "<markdown steps>",
- "required_tools": ["<tool name>", ...]}
+ "required_tools": ["<tool name>", ...],
+ "eval_cases": [{"case_id": "case-1",
+                 "query": "<future user question matching a trigger keyword>",
+                 "expected_answer_contains": ["<substring from procedure>"],
+                 "expect_model_blocks": []}]}
 """
 
 

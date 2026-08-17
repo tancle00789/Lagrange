@@ -41,7 +41,10 @@ Key tensions:
    complete. Pass rate is pure assertion counting. Approval requires
    `status == "testing"` *and* at least one passing case
    (`MIN_APPROVAL_PASS_RATE`). An optional LLM judge (capability `"judge"`)
-   may attach notes but never changes pass/fail.
+   may attach notes but never changes pass/fail. Distillation also asks the
+   model for 2–4 suggested eval cases; they are parsed defensively and
+   pinned to the candidate (`expect_skill_matched`) so the human approver
+   starts from a working eval suite instead of a blank page.
 3. **Matching is deterministic and free.** `SkillRegistry` holds only the
    latest approved version per family, loaded explicitly from the store
    (no implicit registration path). The graph's `match_skills` node matches
@@ -73,3 +76,8 @@ Key tensions:
 - Distillation reuses the chat model under capability `"distill"` (registered
   in the router like `"answer"`/`"plan"`); a stronger model can be swapped in
   without touching call sites.
+- Local 4B models systematically violate output-format details (underscore
+  skill ids, block names as tool names). The distill path therefore
+  normalizes ids (`kv_cache_simulation` → `kv-cache-simulation`) and
+  hard-rejects unknown tools, instead of trusting format instructions.
+  Verified live against qwen3:4b in `scripts/smoke_test_skills.sh`.
