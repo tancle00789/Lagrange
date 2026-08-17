@@ -89,25 +89,7 @@ async def distill_candidate_record(
     if unknown:
         raise DistillError(f"distill proposed unknown tools: {unknown}")
 
-    try:
-        conditions = [
-            TriggerCondition(**item)
-            for item in (body.get("trigger_conditions") or [])
-            if isinstance(item, dict)
-        ]
-        record = SkillRecord(
-            skill_id=normalize_skill_id(str(body.get("skill_id") or "")),
-            version=next_version(existing_versions),
-            status="candidate",
-            name=str(body.get("name") or "")[:200],
-            description=str(body.get("description") or "")[:1000],
-            trigger_conditions=conditions,
-            procedure=str(body.get("procedure") or "")[:8000],
-            required_tools=[str(name) for name in proposed_tools][:20],
-            source_task_ids=[source_task_id],
-        )
-    except ValueError as exc:
-        raise DistillError(f"distill output failed schema validation: {exc}") from exc
+    skill_id = normalize_skill_id(str(body.get("skill_id") or ""))
 
     eval_cases: list[EvalCase] = []
     for index, item in enumerate(body.get("eval_cases") or []):
@@ -122,7 +104,7 @@ async def distill_candidate_record(
                         str(needle)
                         for needle in (item.get("expected_answer_contains") or [])
                     ][:10],
-                    expect_skill_matched=record.skill_id,
+                    expect_skill_matched=skill_id,
                     expect_model_blocks=[
                         str(name) for name in (item.get("expect_model_blocks") or [])
                     ][:5],
@@ -130,4 +112,25 @@ async def distill_candidate_record(
             )
         except ValueError:
             continue  # drop malformed cases; the record stands on its own
-    return record, eval_cases[:5]
+
+    try:
+        conditions = [
+            TriggerCondition(**item)
+            for item in (body.get("trigger_conditions") or [])
+            if isinstance(item, dict)
+        ]
+        record = SkillRecord(
+            skill_id=skill_id,
+            version=next_version(existing_versions),
+            status="candidate",
+            name=str(body.get("name") or "")[:200],
+            description=str(body.get("description") or "")[:1000],
+            trigger_conditions=conditions,
+            procedure=str(body.get("procedure") or "")[:8000],
+            required_tools=[str(name) for name in proposed_tools][:20],
+            source_task_ids=[source_task_id],
+            suggested_eval_cases=eval_cases[:5],
+        )
+    except ValueError as exc:
+        raise DistillError(f"distill output failed schema validation: {exc}") from exc
+    return record, record.suggested_eval_cases

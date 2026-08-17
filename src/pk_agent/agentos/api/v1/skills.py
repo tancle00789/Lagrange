@@ -32,7 +32,8 @@ class DistillRequest(BaseModel):
 class EvaluateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cases: list[EvalCase] = Field(min_length=1, max_length=20)
+    # Optional: defaults to the record's distill-suggested cases.
+    cases: list[EvalCase] = Field(default_factory=list, max_length=20)
 
 
 def _skill_store(request: Request) -> SkillStore:
@@ -155,12 +156,18 @@ async def evaluate_skill(
             status_code=409,
             detail=f"cannot evaluate a {record.status} skill",
         )
+    cases = body.cases or list(record.suggested_eval_cases)
+    if not cases:
+        raise HTTPException(
+            status_code=422,
+            detail="no eval cases provided and the skill has no suggested cases",
+        )
 
     evaluator = SkillEvaluator(
         model_block_registry=getattr(request.app.state, "model_block_registry", None),
         judge_router=getattr(request.app.state, "model_router", None),
     )
-    result = await evaluator.evaluate(record, body.cases)
+    result = await evaluator.evaluate(record, cases)
     await store.put_eval_run(result.run_id, skill_id, version, result)
 
     if record.status == "candidate":

@@ -42,6 +42,17 @@ class TriggerCondition(BaseModel):
         return value
 
 
+class EvalCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=1000)
+    # Deterministic assertions (no LLM judge required):
+    expected_answer_contains: list[str] = Field(default_factory=list, max_length=10)
+    expect_skill_matched: str | None = None
+    expect_model_blocks: list[str] = Field(default_factory=list, max_length=5)
+
+
 class SkillRecord(BaseModel):
     """One version of a reusable, verified procedure (docx §14 fields)."""
 
@@ -58,6 +69,9 @@ class SkillRecord(BaseModel):
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     source_task_ids: list[str] = Field(default_factory=list, max_length=50)
+    # Model-suggested cases from distillation, persisted so the evaluate
+    # endpoint/UI can run them later without re-distilling.
+    suggested_eval_cases: list[EvalCase] = Field(default_factory=list, max_length=5)
     eval_pass_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     approved_by: str | None = None
@@ -86,17 +100,6 @@ class SkillRecord(BaseModel):
         if not value.strip():
             raise ValueError("procedure must not be empty")
         return value
-
-
-class EvalCase(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    case_id: str = Field(min_length=1, max_length=100)
-    query: str = Field(min_length=1, max_length=1000)
-    # Deterministic assertions (no LLM judge required):
-    expected_answer_contains: list[str] = Field(default_factory=list, max_length=10)
-    expect_skill_matched: str | None = None
-    expect_model_blocks: list[str] = Field(default_factory=list, max_length=5)
 
 
 class EvalResult(BaseModel):

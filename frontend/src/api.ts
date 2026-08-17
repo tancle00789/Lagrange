@@ -1,4 +1,12 @@
-import type { LiteratureRecord, ModelBlockInfo, TaskStatus } from "./types";
+import type {
+  DistillResponse,
+  EvaluateResponse,
+  LiteratureRecord,
+  ModelBlockInfo,
+  SkillRecord,
+  SkillStatus,
+  TaskStatus,
+} from "./types";
 
 const TOKEN_KEY = "pk_agent_token";
 
@@ -100,6 +108,42 @@ export function cancelTask(taskId: string): Promise<TaskStatus> {
   return request<TaskStatus>(`/api/v1/tasks/${taskId}`, { method: "DELETE" });
 }
 
+export function listApprovedSkills(): Promise<SkillRecord[]> {
+  return request<SkillRecord[]>("/api/v1/skills");
+}
+
+export function listSkillPipeline(status: SkillStatus): Promise<SkillRecord[]> {
+  return request<SkillRecord[]>(`/api/v1/skills/pipeline?status=${status}`);
+}
+
+export function distillSkill(taskId: string): Promise<DistillResponse> {
+  return request<DistillResponse>("/api/v1/skills/distill", {
+    method: "POST",
+    body: JSON.stringify({ task_id: taskId }),
+  });
+}
+
+export function evaluateSkill(skillId: string, version: string): Promise<EvaluateResponse> {
+  // No explicit cases: the backend falls back to the record's
+  // distill-suggested cases.
+  return request<EvaluateResponse>(`/api/v1/skills/${skillId}/${version}/evaluate`, {
+    method: "POST",
+    body: JSON.stringify({ cases: [] }),
+  });
+}
+
+export function approveSkill(skillId: string, version: string): Promise<SkillRecord> {
+  return request<SkillRecord>(`/api/v1/skills/${skillId}/${version}/approve`, {
+    method: "POST",
+  });
+}
+
+export function deprecateSkill(skillId: string, version: string): Promise<SkillRecord> {
+  return request<SkillRecord>(`/api/v1/skills/${skillId}/${version}/deprecate`, {
+    method: "POST",
+  });
+}
+
 export function subscribeTaskEvents(
   taskId: string,
   onEvent: (event: string, data: string) => void,
@@ -120,6 +164,7 @@ export function subscribeTaskEvents(
       for (const type of [
         "snapshot",
         "started",
+        "skills_matched",
         "knowledge_retrieved",
         "knowledge_degraded",
         "external_retrieved",

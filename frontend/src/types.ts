@@ -78,3 +78,63 @@ export interface TaskEvent {
   type: string;
   [key: string]: unknown;
 }
+
+export interface TriggerCondition {
+  keywords: string[];
+  regex_patterns: string[];
+  priority: number;
+}
+
+export interface EvalCase {
+  case_id: string;
+  query: string;
+  expected_answer_contains: string[];
+  expect_skill_matched: string | null;
+  expect_model_blocks: string[];
+}
+
+export interface EvalResult {
+  run_id: string;
+  total_cases: number;
+  passed_cases: number;
+  eval_pass_rate: number;
+  details: {
+    case_id: string;
+    passed: boolean;
+    failures: string[];
+  }[];
+  compared_to_version: string | null;
+  regression_detected: boolean;
+  judge_notes: string[];
+}
+
+export type SkillStatus = "candidate" | "testing" | "approved" | "deprecated";
+
+export interface SkillRecord {
+  skill_id: string;
+  version: string;
+  status: SkillStatus;
+  name: string;
+  description: string;
+  trigger_conditions: TriggerCondition[];
+  procedure: string;
+  required_tools: string[];
+  source_task_ids: string[];
+  suggested_eval_cases: EvalCase[];
+  eval_pass_rate: number;
+  created_at: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  parent_version: string | null;
+}
+
+export interface DistillResponse {
+  worth_saving: boolean;
+  record: SkillRecord | null;
+  eval_cases: EvalCase[];
+}
+
+export interface EvaluateResponse {
+  eval_result: EvalResult;
+  record: SkillRecord;
+}

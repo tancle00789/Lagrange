@@ -164,6 +164,42 @@ button:disabled {
   color: #ef9a9a;
 }
 
+.status.approved {
+  background: #1f4d38;
+  color: #7fd8ae;
+}
+
+.status.testing {
+  background: #54431c;
+  color: #e5c06a;
+}
+
+.status.candidate {
+  background: #274a75;
+  color: #9ec7f5;
+}
+
+.status.deprecated {
+  background: #572626;
+  color: #ef9a9a;
+}
+
+.tabs {
+  display: flex;
+  gap: 16px;
+}
+
+.tabs .link {
+  font-size: 14px;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs .link.active {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
 .timeline {
   list-style: none;
   margin: 0;

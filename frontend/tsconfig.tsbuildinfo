@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/taskdetail.tsx","./src/components/taskform.tsx","./src/components/tasklist.tsx","./src/components/tokengate.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/skillspanel.tsx","./src/components/taskdetail.tsx","./src/components/taskform.tsx","./src/components/tasklist.tsx","./src/components/tokengate.tsx"],"version":"5.9.3"}

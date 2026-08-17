@@ -5,9 +5,11 @@ import TokenGate from "./components/TokenGate";
 import TaskForm from "./components/TaskForm";
 import TaskList from "./components/TaskList";
 import TaskDetail from "./components/TaskDetail";
+import SkillsPanel from "./components/SkillsPanel";
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean>(getToken() !== "");
+  const [view, setView] = useState<"tasks" | "skills">("tasks");
   const [tasks, setTasks] = useState<TaskStatus[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
@@ -23,11 +25,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || view !== "tasks") return;
     void refresh();
     const timer = setInterval(() => void refresh(), 5000);
     return () => clearInterval(timer);
-  }, [authed, refresh]);
+  }, [authed, view, refresh]);
 
   if (!authed) {
     return (
@@ -46,6 +48,20 @@ export default function App() {
     <div className="layout">
       <header>
         <h1>Production Knowledge Agent</h1>
+        <nav className="tabs">
+          <button
+            className={view === "tasks" ? "link active" : "link"}
+            onClick={() => setView("tasks")}
+          >
+            Tasks
+          </button>
+          <button
+            className={view === "skills" ? "link active" : "link"}
+            onClick={() => setView("skills")}
+          >
+            Skills
+          </button>
+        </nav>
         <button
           className="link"
           onClick={() => {
@@ -56,25 +72,33 @@ export default function App() {
           change token
         </button>
       </header>
-      <main>
-        <section className="sidebar">
-          <TaskForm
-            onCreated={(task) => {
-              setSelectedId(task.task_id);
-              void refresh();
-            }}
-          />
-          <TaskList tasks={tasks} selectedId={selectedId} onSelect={setSelectedId} />
-          {error && <p className="error">{error}</p>}
-        </section>
-        <section className="detail">
-          {selected ? (
-            <TaskDetail key={selected.task_id} task={selected} onChanged={refresh} />
-          ) : (
-            <p className="muted">Select a task or create a new one.</p>
-          )}
-        </section>
-      </main>
+      {view === "skills" ? (
+        <main>
+          <section className="detail">
+            <SkillsPanel />
+          </section>
+        </main>
+      ) : (
+        <main>
+          <section className="sidebar">
+            <TaskForm
+              onCreated={(task) => {
+                setSelectedId(task.task_id);
+                void refresh();
+              }}
+            />
+            <TaskList tasks={tasks} selectedId={selectedId} onSelect={setSelectedId} />
+            {error && <p className="error">{error}</p>}
+          </section>
+          <section className="detail">
+            {selected ? (
+              <TaskDetail key={selected.task_id} task={selected} onChanged={refresh} />
+            ) : (
+              <p className="muted">Select a task or create a new one.</p>
+            )}
+          </section>
+        </main>
+      )}
     </div>
   );
 }

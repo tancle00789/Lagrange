@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { cancelTask, downloadArtifact, getTask, resumeTask, subscribeTaskEvents } from "../api";
+import {
+  cancelTask,
+  distillSkill,
+  downloadArtifact,
+  getTask,
+  resumeTask,
+  subscribeTaskEvents,
+} from "../api";
 import { sourceId, type TaskStatus } from "../types";
 
 interface Props {
@@ -18,6 +25,8 @@ export default function TaskDetail({ task, onChanged }: Props) {
   const [current, setCurrent] = useState<TaskStatus>(task);
   const [events, setEvents] = useState<TimelineEntry[]>([]);
   const [error, setError] = useState("");
+  const [distilling, setDistilling] = useState(false);
+  const [distillNote, setDistillNote] = useState("");
 
   useEffect(() => {
     setCurrent(task);
@@ -41,6 +50,31 @@ export default function TaskDetail({ task, onChanged }: Props) {
     }
   };
 
+  const distill = async () => {
+    setDistilling(true);
+    setDistillNote("");
+    setError("");
+    try {
+      const response = await distillSkill(current.task_id);
+      if (response.worth_saving && response.record) {
+        const record = response.record;
+        setDistillNote(
+          `candidate ${record.skill_id} v${record.version} created` +
+            (response.eval_cases.length > 0
+              ? ` with ${response.eval_cases.length} suggested eval case(s)`
+              : "") +
+            " — see the Skills tab",
+        );
+      } else {
+        setDistillNote("model judged this task not generalizable (no skill saved)");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDistilling(false);
+    }
+  };
+
   const report = current.report;
   const validChunkIds = new Set(current.knowledge_hits.map((h) => h.chunk_id));
   for (const record of current.external_sources) {
@@ -54,7 +88,9 @@ export default function TaskDetail({ task, onChanged }: Props) {
           Task <span className="id">{current.task_id}</span>{" "}
           <span className={`status ${current.status}`}>{current.status}</span>
         </h2>
-        {(ACTIVE.has(current.status) || current.status === "paused") && (
+        {(ACTIVE.has(current.status) ||
+          current.status === "paused" ||
+          current.status === "completed") && (
           <div className="actions">
             {current.status === "paused" && (
               <>
@@ -77,8 +113,14 @@ export default function TaskDetail({ task, onChanged }: Props) {
                 Cancel
               </button>
             )}
+            {current.status === "completed" && (
+              <button className="secondary" disabled={distilling} onClick={() => void distill()}>
+                {distilling ? "Distilling..." : "Distill skill"}
+              </button>
+            )}
           </div>
         )}
+        {distillNote && <p className="muted">{distillNote}</p>}
         {error && <p className="error">{error}</p>}
       </div>
 
