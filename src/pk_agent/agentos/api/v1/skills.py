@@ -47,6 +47,14 @@ def _record_view(record: SkillRecord) -> dict[str, Any]:
     return record.model_dump(mode="json")
 
 
+async def _publish_registry_change(request: Request) -> None:
+    """Refresh this replica now, then notify the rest via the coordinator."""
+    await request.app.state.skill_registry.refresh()
+    coordinator = getattr(request.app.state, "skill_refresh", None)
+    if coordinator is not None:
+        await coordinator.request()
+
+
 @router.get("")
 async def list_approved_skills(
     request: Request,
@@ -210,7 +218,7 @@ async def approve_skill(
         )
     except SkillTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await request.app.state.skill_registry.refresh()
+    await _publish_registry_change(request)
     return _record_view(updated)
 
 
@@ -228,5 +236,5 @@ async def deprecate_skill(
         raise HTTPException(status_code=404, detail="skill not found") from None
     except SkillTransitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await request.app.state.skill_registry.refresh()
+    await _publish_registry_change(request)
     return _record_view(updated)

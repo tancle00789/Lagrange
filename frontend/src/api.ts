@@ -1,5 +1,6 @@
 import type {
   DistillResponse,
+  EvalCase,
   EvaluateResponse,
   LiteratureRecord,
   ModelBlockInfo,
@@ -123,12 +124,16 @@ export function distillSkill(taskId: string): Promise<DistillResponse> {
   });
 }
 
-export function evaluateSkill(skillId: string, version: string): Promise<EvaluateResponse> {
-  // No explicit cases: the backend falls back to the record's
+export function evaluateSkill(
+  skillId: string,
+  version: string,
+  cases?: EvalCase[],
+): Promise<EvaluateResponse> {
+  // Without explicit cases the backend falls back to the record's
   // distill-suggested cases.
   return request<EvaluateResponse>(`/api/v1/skills/${skillId}/${version}/evaluate`, {
     method: "POST",
-    body: JSON.stringify({ cases: [] }),
+    body: JSON.stringify({ cases: cases ?? [] }),
   });
 }
 

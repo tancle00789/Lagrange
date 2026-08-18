@@ -21,6 +21,7 @@ from pk_agent.harness.bus import RedisAgentEventBus
 from pk_agent.models.io import TaskCreateRequest
 from pk_agent.security.sse import RedisSseTicketStore
 from pk_agent.security.tenant import Principal
+from pk_agent.skills.refresh import RedisSkillRefreshCoordinator
 
 
 def _clients() -> tuple[Redis, Redis]:
@@ -101,6 +102,26 @@ async def test_redis_cancellation_reaches_owner_instance() -> None:
     assert run.cancelled()
     await owner.aclose()
     await requester.aclose()
+    await first.aclose()
+    await second.aclose()
+
+
+async def test_redis_skill_refresh_reaches_other_replicas() -> None:
+    first, second = _clients()
+    listener_a = RedisSkillRefreshCoordinator(first, key_prefix="test")
+    listener_b = RedisSkillRefreshCoordinator(second, key_prefix="test")
+    refreshed_a = asyncio.Event()
+    refreshed_b = asyncio.Event()
+
+    await listener_a.start(refreshed_a.set)
+    await listener_b.start(refreshed_b.set)
+    # A publish from one replica must wake every listener (including its own).
+    await listener_a.request()
+
+    await asyncio.wait_for(refreshed_a.wait(), timeout=1)
+    await asyncio.wait_for(refreshed_b.wait(), timeout=1)
+    await listener_a.aclose()
+    await listener_b.aclose()
     await first.aclose()
     await second.aclose()
 

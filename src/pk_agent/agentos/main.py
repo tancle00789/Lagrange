@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -57,6 +58,10 @@ from pk_agent.providers.weknora import WeKnoraKnowledgeProvider
 from pk_agent.providers.weknora_client import WeKnoraClient
 from pk_agent.security.jwks import JwksAuthenticator
 from pk_agent.security.sse import RedisSseTicketStore, SseTicketStore, TicketStore
+from pk_agent.skills.refresh import (
+    RedisSkillRefreshCoordinator,
+    SkillRefreshCoordinator,
+)
 from pk_agent.skills.registry import SkillRegistry
 from pk_agent.skills.store import InMemorySkillStore, PgSkillStore, SkillStore
 
@@ -65,6 +70,8 @@ STATIC_DIR_CANDIDATES = [
     Path(__file__).resolve().parents[3] / "frontend" / "dist",
 ]
 DEV_CORS_ORIGINS = ["http://localhost:5173"]
+
+logger = logging.getLogger(__name__)
 
 
 def _build_task_store(settings: Settings) -> TaskStore:
@@ -237,6 +244,7 @@ def create_app(
         rate_limiter: RateLimit
         sse_tickets: TicketStore
         cancellation: CancellationCoordinator
+        skill_refresh: SkillRefreshCoordinator
         if isinstance(task_store, RedisTaskStore):
             await task_store.client.ping()
             runtime_redis = task_store.client
@@ -254,6 +262,9 @@ def create_app(
             cancellation = RedisCancellationCoordinator(
                 runtime_redis, key_prefix=settings.runtime_key_prefix
             )
+            skill_refresh = RedisSkillRefreshCoordinator(
+                runtime_redis, key_prefix=settings.runtime_key_prefix
+            )
             job_queue = RedisJobQueue(
                 runtime_redis,
                 key_prefix=settings.runtime_key_prefix,
@@ -267,6 +278,7 @@ def create_app(
             rate_limiter = RateLimiter(settings.rate_limit_rps)
             sse_tickets = SseTicketStore(settings.sse_ticket_ttl_seconds)
             cancellation = CancellationCoordinator()
+            skill_refresh = SkillRefreshCoordinator()
             job_queue = None
         model_router = ModelRouter()
         answer_model = _build_answer_model(settings)
@@ -324,6 +336,7 @@ def create_app(
         app.state.job_queue = job_queue
         app.state.skill_store = skill_store
         app.state.skill_registry = skill_registry
+        app.state.skill_refresh = skill_refresh
         app.state.task_runs = {}
         app.state.shutting_down = False
 
@@ -332,8 +345,16 @@ def create_app(
             if run is not None and not run.done():
                 run.cancel()
 
+        async def refresh_skills_safe() -> None:
+            try:
+                await skill_registry.refresh()
+            except Exception:  # noqa: BLE001 - listener must not die
+                logger.warning("skill registry refresh failed", exc_info=True)
+
         if isinstance(cancellation, RedisCancellationCoordinator):
             await cancellation.start(cancel_owned)
+        if isinstance(skill_refresh, RedisSkillRefreshCoordinator):
+            await skill_refresh.start(refresh_skills_safe)
         app.state.graph = build_research_graph(
             checkpointer=checkpointer,
             model_router=model_router,
@@ -352,6 +373,7 @@ def create_app(
         yield
         app.state.shutting_down = True
         await cancellation.aclose()
+        await skill_refresh.aclose()
         if job_queue is not None:
             await job_queue.aclose()
         active_runs = list(app.state.task_runs.values())

@@ -6,16 +6,84 @@ import {
   listApprovedSkills,
   listSkillPipeline,
 } from "../api";
-import type { EvalResult, SkillRecord } from "../types";
+import type { EvalCase, EvalResult, SkillRecord } from "../types";
 
 function skillKey(record: SkillRecord): string {
   return `${record.skill_id}@${record.version}`;
+}
+
+function blankCase(skillId: string, index: number): EvalCase {
+  return {
+    case_id: `case-${index + 1}`,
+    query: "",
+    expected_answer_contains: [],
+    expect_skill_matched: skillId,
+    expect_model_blocks: [],
+  };
+}
+
+function EvalCaseEditor({
+  skillId,
+  cases,
+  onChange,
+}: {
+  skillId: string;
+  cases: EvalCase[];
+  onChange: (cases: EvalCase[]) => void;
+}) {
+  const update = (index: number, patch: Partial<EvalCase>) => {
+    onChange(cases.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  };
+  return (
+    <div className="case-editor">
+      {cases.map((evalCase, index) => (
+        <div key={index} className="case-row">
+          <input
+            type="text"
+            placeholder="query a user might ask"
+            value={evalCase.query}
+            onChange={(e) => update(index, { query: e.target.value })}
+          />
+          <textarea
+            rows={2}
+            placeholder="expected answer needles, one per line"
+            value={evalCase.expected_answer_contains.join("\n")}
+            onChange={(e) =>
+              update(index, {
+                expected_answer_contains: e.target.value
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+          <button
+            className="link"
+            onClick={() => onChange(cases.filter((_, i) => i !== index))}
+          >
+            remove
+          </button>
+        </div>
+      ))}
+      <button
+        className="link"
+        disabled={cases.length >= 20}
+        onClick={() => onChange([...cases, blankCase(skillId, cases.length)])}
+      >
+        + add case
+      </button>
+    </div>
+  );
 }
 
 function SkillCard({
   record,
   evalResult,
   busy,
+  editorOpen,
+  draftCases,
+  onToggleEditor,
+  onDraftChange,
   onEvaluate,
   onApprove,
   onDeprecate,
@@ -23,11 +91,16 @@ function SkillCard({
   record: SkillRecord;
   evalResult?: EvalResult;
   busy: boolean;
+  editorOpen: boolean;
+  draftCases?: EvalCase[];
+  onToggleEditor?: () => void;
+  onDraftChange?: (cases: EvalCase[]) => void;
   onEvaluate?: () => void;
   onApprove?: () => void;
   onDeprecate: () => void;
 }) {
   const keywords = record.trigger_conditions.flatMap((c) => c.keywords);
+  const caseCount = draftCases?.length ?? record.suggested_eval_cases.length;
   return (
     <li>
       <div className="meta">
@@ -57,12 +130,22 @@ function SkillCard({
             ))}
         </div>
       )}
+      {editorOpen && draftCases && onDraftChange && (
+        <EvalCaseEditor
+          skillId={record.skill_id}
+          cases={draftCases}
+          onChange={onDraftChange}
+        />
+      )}
       <div className="actions">
+        {onToggleEditor && (
+          <button className="link" onClick={onToggleEditor}>
+            {editorOpen ? "hide cases" : `eval cases (${caseCount})`}
+          </button>
+        )}
         {onEvaluate && (
           <button className="secondary" disabled={busy} onClick={onEvaluate}>
-            {record.suggested_eval_cases.length > 0
-              ? `Evaluate (${record.suggested_eval_cases.length} cases)`
-              : "Evaluate"}
+            Evaluate{caseCount > 0 ? ` (${caseCount})` : ""}
           </button>
         )}
         {onApprove && (
@@ -83,6 +166,8 @@ export default function SkillsPanel() {
   const [testing, setTesting] = useState<SkillRecord[]>([]);
   const [candidates, setCandidates] = useState<SkillRecord[]>([]);
   const [evalResults, setEvalResults] = useState<Record<string, EvalResult>>({});
+  const [drafts, setDrafts] = useState<Record<string, EvalCase[]>>({});
+  const [openEditors, setOpenEditors] = useState<Record<string, boolean>>({});
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
 
@@ -120,10 +205,34 @@ export default function SkillsPanel() {
     }
   };
 
+  const toggleEditor = (record: SkillRecord) => {
+    const key = skillKey(record);
+    setOpenEditors((prev) => ({ ...prev, [key]: !prev[key] }));
+    // Seed the draft from the distill-suggested cases on first open.
+    setDrafts((prev) =>
+      prev[key] !== undefined
+        ? prev
+        : {
+            ...prev,
+            [key]:
+              record.suggested_eval_cases.length > 0
+                ? record.suggested_eval_cases.map((c) => ({ ...c }))
+                : [blankCase(record.skill_id, 0)],
+          },
+    );
+  };
+
   const evaluate = (record: SkillRecord) =>
     act(record, async () => {
-      const response = await evaluateSkill(record.skill_id, record.version);
-      setEvalResults((prev) => ({ ...prev, [skillKey(record)]: response.eval_result }));
+      const key = skillKey(record);
+      const draft = drafts[key];
+      // An edited draft overrides the backend's suggested-case fallback.
+      const cases = draft?.filter((c) => c.query.trim());
+      if (draft !== undefined && (cases === undefined || cases.length === 0)) {
+        throw new Error("add at least one eval case with a query");
+      }
+      const response = await evaluateSkill(record.skill_id, record.version, cases);
+      setEvalResults((prev) => ({ ...prev, [key]: response.eval_result }));
     });
 
   const renderSection = (
@@ -143,6 +252,14 @@ export default function SkillsPanel() {
             record={record}
             evalResult={evalResults[skillKey(record)]}
             busy={busyKey === skillKey(record)}
+            editorOpen={openEditors[skillKey(record)] ?? false}
+            draftCases={drafts[skillKey(record)]}
+            onToggleEditor={actions.evaluate ? () => toggleEditor(record) : undefined}
+            onDraftChange={
+              actions.evaluate
+                ? (cases) => setDrafts((prev) => ({ ...prev, [skillKey(record)]: cases }))
+                : undefined
+            }
             onEvaluate={actions.evaluate ? () => void evaluate(record) : undefined}
             onApprove={
               actions.approve
@@ -171,6 +288,7 @@ export default function SkillsPanel() {
           Reusable procedures distilled from completed tasks. A candidate must pass a
           deterministic offline evaluation before it can be approved; only approved skills
           are injected into future answers. Distill from a completed task in the Tasks tab.
+          Open "eval cases" to review or edit the cases before evaluating.
         </p>
         {error && <p className="error">{error}</p>}
       </div>

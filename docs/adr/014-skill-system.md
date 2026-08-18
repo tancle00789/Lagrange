@@ -55,9 +55,11 @@ Key tensions:
    (`format_approved_procedures`) — trusted because they passed human
    approval, and clearly separated from untrusted evidence.
 4. **Registry freshness is explicit.** `approve`/`deprecate` endpoints call
-   `registry.refresh()` inline after the store transition, so a single
-   replica never serves stale skills. (Multi-replica refresh via Redis
-   pub/sub, like task cancellation, is future work; skills change rarely.)
+   `registry.refresh()` inline after the store transition, then publish on a
+   Redis control channel (`{prefix}:control:skills`) via
+   `RedisSkillRefreshCoordinator` so every replica reloads — the same
+   pub/sub pattern as task cancellation (ADR 009). Single-process runtimes
+   use the no-op `SkillRefreshCoordinator`.
 5. **Persistence mirrors the runtime store.** Postgres (`skill_versions`,
    `skill_eval_runs`, idempotent DDL, `PgSkillStore`) when `database_url` is
    postgres; `InMemorySkillStore` otherwise (dev/tests). Transitions use

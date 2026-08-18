@@ -267,6 +267,31 @@ button:disabled {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  align-items: center;
+}
+
+.case-editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.case-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.case-row textarea {
+  min-height: 40px;
+}
+
+.case-row button {
+  align-self: flex-end;
 }
 
 .gate {

@@ -91,6 +91,44 @@ def test_full_lifecycle_evaluate_approve_deprecate(client) -> None:
     assert registry.get("kv-cache-compare") is None
 
 
+def test_approve_and_deprecate_notify_other_replicas(client) -> None:
+    """Lifecycle transitions must ping the refresh coordinator (pub/sub fan-out)."""
+
+    class Recorder:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self) -> None:
+            self.calls += 1
+
+        async def aclose(self) -> None:
+            return None
+
+    recorder = Recorder()
+    original = client.app.state.skill_refresh
+    client.app.state.skill_refresh = recorder
+    try:
+        _seed(client, _candidate())
+        store = client.app.state.skill_store
+        asyncio.run(
+            store.transition("kv-cache-compare", "1.0.0", "testing", eval_pass_rate=1.0)
+        )
+
+        response = client.post(
+            "/api/v1/skills/kv-cache-compare/1.0.0/approve", headers=AUTH
+        )
+        assert response.status_code == 200, response.text
+        assert recorder.calls == 1
+
+        response = client.post(
+            "/api/v1/skills/kv-cache-compare/1.0.0/deprecate", headers=AUTH
+        )
+        assert response.status_code == 200, response.text
+        assert recorder.calls == 2
+    finally:
+        client.app.state.skill_refresh = original
+
+
 def test_distill_from_completed_task(client) -> None:
     asyncio.run(
         client.app.state.task_store.create(
