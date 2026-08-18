@@ -190,6 +190,9 @@ services:
     # Heavy image (~4GB); reuses the published/local image when present.
     # `docker compose build weknora-docreader` rebuilds from source if needed.
     image: wechatopenai/weknora-docreader:latest
+    # A malformed PDF can SIGABRT the native parser; restart so one bad
+    # document does not take the gRPC backend down for good.
+    restart: unless-stopped
     build:
       context: ../WeKnora
       dockerfile: docker/Dockerfile.docreader
@@ -199,6 +202,9 @@ services:
       - weknora-docreader-tmp:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+      # The builtin PDF parser is not thread-safe (observed SIGABRT under two
+      # concurrent Read RPCs); serialize requests at the gRPC layer.
+      - DOCREADER_GRPC_MAX_WORKERS=1
     networks:
       - weknora-net
 

@@ -59,6 +59,19 @@ def unwrap(response: httpx.Response, action: str) -> dict[str, Any]:
     return body if isinstance(body, dict) else {"data": body}
 
 
+def items_of(payload: dict[str, Any]) -> list[Any]:
+    """List endpoints variously return a bare list, {"data": [...]}, or
+    {"data": {"items": [...]}} — accept all three."""
+    data = payload.get("data")
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        items = data.get("items")
+        if isinstance(items, list):
+            return items
+    return []
+
+
 def main() -> None:
     with httpx.Client(timeout=15.0) as client:
         print(f"waiting for weknora-app at {BASE_URL} ...")
@@ -113,7 +126,7 @@ def main() -> None:
         print("api key created (name=pk-agent)")
 
         models = unwrap(client.get(f"{API}/models", headers=auth), "list models")
-        model_items = (models.get("data") or {}).get("items") or models.get("data") or []
+        model_items = items_of(models)
         embedding_model_id = next(
             (
                 m.get("id")
@@ -147,7 +160,7 @@ def main() -> None:
         print(f"embedding model id: {embedding_model_id}")
 
         kbs = unwrap(client.get(f"{API}/knowledge-bases", headers=auth), "list KBs")
-        kb_items = (kbs.get("data") or {}).get("items") or kbs.get("data") or []
+        kb_items = items_of(kbs)
         kb_id = next(
             (
                 k.get("id")
