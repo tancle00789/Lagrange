@@ -21,6 +21,7 @@ const task = {
     },
   ],
   external_sources: [],
+  model_runs: [],
   messages: [],
 };
 
@@ -63,13 +64,13 @@ test("authenticates, creates a task, and renders a grounded report", async ({ pa
   );
 
   await page.goto("/");
-  await page.getByPlaceholder("Bearer token").fill("dev:tenant-e2e:user-e2e:admin");
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByPlaceholder("访问令牌").fill("dev:tenant-e2e:user-e2e:admin");
+  await page.getByRole("button", { name: "保存" }).click();
 
-  await expect(page.getByRole("heading", { name: "New Task" })).toBeVisible();
-  await page.getByPlaceholder("Ask a research question...").fill("Show grounded evidence");
-  await page.getByLabel(/allow external literature search/).check();
-  await page.getByRole("button", { name: "Create task" }).click();
+  await expect(page.getByRole("heading", { name: "新建任务" })).toBeVisible();
+  await page.getByPlaceholder("提出一个研究问题……").fill("Show grounded evidence");
+  await page.getByLabel(/允许外部文献检索/).check();
+  await page.getByRole("button", { name: "创建任务" }).click();
 
   await expect(page.getByText("Grounded portfolio answer")).toBeVisible();
   await expect(page.getByText("Verified claim")).toBeVisible();

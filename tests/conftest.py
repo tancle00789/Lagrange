@@ -8,6 +8,16 @@ from pk_agent.config import Settings
 from pk_agent.literature.fake import FakeLiteratureSource
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_from_dotenv():
+    """Tests must never inherit the developer's local .env — it points at the
+    real Ollama/WeKnora stack and would turn unit tests into live calls."""
+    original = Settings.model_config.get("env_file")
+    Settings.model_config["env_file"] = None
+    yield
+    Settings.model_config["env_file"] = original
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(

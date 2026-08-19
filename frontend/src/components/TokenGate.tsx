@@ -10,14 +10,14 @@ export default function TokenGate({ onSave }: Props) {
   return (
     <div className="gate">
       <div className="panel">
-        <h2>Access Token</h2>
+        <h2>访问令牌</h2>
         <p className="muted">
-          Dev token format: <code>dev:tenant-id:user-id:role</code>
+          开发令牌格式：<code>dev:tenant-id:user-id:role</code>
         </p>
         <input
           type="text"
           value={value}
-          placeholder="Bearer token"
+          placeholder="访问令牌"
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && value.trim()) onSave(value.trim());
@@ -25,7 +25,7 @@ export default function TokenGate({ onSave }: Props) {
         />
         <div className="actions">
           <button disabled={!value.trim()} onClick={() => onSave(value.trim())}>
-            Save
+            保存
           </button>
         </div>
       </div>

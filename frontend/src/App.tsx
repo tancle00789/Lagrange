@@ -53,13 +53,13 @@ export default function App() {
             className={view === "tasks" ? "link active" : "link"}
             onClick={() => setView("tasks")}
           >
-            Tasks
+            任务
           </button>
           <button
             className={view === "skills" ? "link active" : "link"}
             onClick={() => setView("skills")}
           >
-            Skills
+            技能
           </button>
         </nav>
         <button
@@ -69,7 +69,7 @@ export default function App() {
             setAuthed(false);
           }}
         >
-          change token
+          更换令牌
         </button>
       </header>
       {view === "skills" ? (
@@ -94,7 +94,7 @@ export default function App() {
             {selected ? (
               <TaskDetail key={selected.task_id} task={selected} onChanged={refresh} />
             ) : (
-              <p className="muted">Select a task or create a new one.</p>
+              <p className="muted">选择一个任务，或新建一个。</p>
             )}
           </section>
         </main>

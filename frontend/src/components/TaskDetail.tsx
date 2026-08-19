@@ -59,14 +59,14 @@ export default function TaskDetail({ task, onChanged }: Props) {
       if (response.worth_saving && response.record) {
         const record = response.record;
         setDistillNote(
-          `candidate ${record.skill_id} v${record.version} created` +
+          `已创建候选技能 ${record.skill_id} v${record.version}` +
             (response.eval_cases.length > 0
-              ? ` with ${response.eval_cases.length} suggested eval case(s)`
+              ? `（附带 ${response.eval_cases.length} 条建议评估用例）`
               : "") +
-            " — see the Skills tab",
+            "——见「技能」页签",
         );
       } else {
-        setDistillNote("model judged this task not generalizable (no skill saved)");
+        setDistillNote("模型判断该任务不具备可复用性（未保存技能）");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -85,7 +85,7 @@ export default function TaskDetail({ task, onChanged }: Props) {
     <div>
       <div className="panel">
         <h2>
-          Task <span className="id">{current.task_id}</span>{" "}
+          任务 <span className="id">{current.task_id}</span>{" "}
           <span className={`status ${current.status}`}>{current.status}</span>
         </h2>
         {(ACTIVE.has(current.status) ||
@@ -95,13 +95,13 @@ export default function TaskDetail({ task, onChanged }: Props) {
             {current.status === "paused" && (
               <>
                 <button onClick={() => void act(() => resumeTask(current.task_id, true))}>
-                  Approve
+                  批准
                 </button>
                 <button
                   className="secondary"
                   onClick={() => void act(() => resumeTask(current.task_id, false, "rejected"))}
                 >
-                  Reject
+                  拒绝
                 </button>
               </>
             )}
@@ -110,12 +110,12 @@ export default function TaskDetail({ task, onChanged }: Props) {
                 className="danger"
                 onClick={() => void act(() => cancelTask(current.task_id))}
               >
-                Cancel
+                取消
               </button>
             )}
             {current.status === "completed" && (
               <button className="secondary" disabled={distilling} onClick={() => void distill()}>
-                {distilling ? "Distilling..." : "Distill skill"}
+                {distilling ? "蒸馏中……" : "蒸馏技能"}
               </button>
             )}
           </div>
@@ -125,8 +125,8 @@ export default function TaskDetail({ task, onChanged }: Props) {
       </div>
 
       <div className="panel">
-        <h2>Event Timeline</h2>
-        {events.length === 0 && <p className="muted">Waiting for events...</p>}
+        <h2>事件时间线</h2>
+        {events.length === 0 && <p className="muted">等待事件……</p>}
         <ul className="timeline">
           {events.map((entry, i) => (
             <li key={i}>
@@ -138,7 +138,7 @@ export default function TaskDetail({ task, onChanged }: Props) {
       </div>
 
       <div className="panel">
-        <h2>Knowledge Hits ({current.knowledge_hits.length})</h2>
+        <h2>知识库命中（{current.knowledge_hits.length}）</h2>
         <ul className="hits">
           {current.knowledge_hits.map((hit) => (
             <li key={hit.chunk_id}>
@@ -153,7 +153,7 @@ export default function TaskDetail({ task, onChanged }: Props) {
 
       {current.external_sources.length > 0 && (
         <div className="panel">
-          <h2>External Sources ({current.external_sources.length})</h2>
+          <h2>外部来源（{current.external_sources.length}）</h2>
           <ul className="hits">
             {current.external_sources.map((record) => (
               <li key={sourceId(record)}>
@@ -161,7 +161,7 @@ export default function TaskDetail({ task, onChanged }: Props) {
                   {sourceId(record)} · {record.venue || record.source_type}
                   {record.published ? ` · ${record.published}` : ""}
                   {typeof record.extra.knowledge_id === "string" && (
-                    <span className="grounded-yes"> · ingested</span>
+                    <span className="grounded-yes"> · 已灌库</span>
                   )}
                 </div>
                 <div>
@@ -181,7 +181,7 @@ export default function TaskDetail({ task, onChanged }: Props) {
 
       {current.model_runs.length > 0 && (
         <div className="panel">
-          <h2>Model Runs ({current.model_runs.length})</h2>
+          <h2>模型运行（{current.model_runs.length}）</h2>
           <ul className="hits">
             {current.model_runs.map((run, i) => (
               <li key={run.run_id || i}>
@@ -221,19 +221,19 @@ export default function TaskDetail({ task, onChanged }: Props) {
 
       {report && (
         <div className="panel">
-          <h2>Report</h2>
+          <h2>报告</h2>
           <p>{report.answer}</p>
           <p>
-            Grounded:{" "}
+            有据可依：{" "}
             <span className={report.grounded ? "grounded-yes" : "grounded-no"}>
-              {report.grounded ? "yes" : "no"}
+              {report.grounded ? "是" : "否"}
             </span>
             {report.dropped_citations > 0 && (
-              <span className="muted"> · {report.dropped_citations} citation(s) dropped</span>
+              <span className="muted"> · {report.dropped_citations} 条引用被丢弃</span>
             )}
           </p>
           {report.notes.length > 0 && (
-            <p className="muted">notes: {report.notes.join("; ")}</p>
+            <p className="muted">备注:{report.notes.join(";")}</p>
           )}
           <ul className="claims">
             {report.claims.map((claim, i) => (

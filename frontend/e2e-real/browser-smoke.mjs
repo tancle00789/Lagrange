@@ -21,15 +21,15 @@ page.setDefaultTimeout(30_000);
 
 try {
   await page.goto(BASE);
-  await page.getByPlaceholder("Bearer token").fill(TOKEN);
-  await page.getByRole("button", { name: "Save" }).click();
-  await page.getByRole("heading", { name: "New Task" }).waitFor();
+  await page.getByPlaceholder("访问令牌").fill(TOKEN);
+  await page.getByRole("button", { name: "保存" }).click();
+  await page.getByRole("heading", { name: "新建任务" }).waitFor();
   console.log("01 authenticated");
   await shot(page, "01-tasks.png");
 
-  await page.getByPlaceholder("Ask a research question...").fill(QUESTION);
-  await page.getByLabel(/allow external literature search/).check();
-  await page.getByRole("button", { name: "Create task" }).click();
+  await page.getByPlaceholder("提出一个研究问题……").fill(QUESTION);
+  await page.getByLabel(/允许外部文献检索/).check();
+  await page.getByRole("button", { name: "创建任务" }).click();
   console.log("02 task created");
   await page.waitForTimeout(3000);
   await shot(page, "02-task-running.png");
@@ -54,12 +54,12 @@ try {
   const hasAnswer = bodyText.length > 200 && !/Waiting for events/.test(bodyText);
   console.log(`04 detail rendered: ${hasAnswer ? "answer + timeline present" : "THIN"}`);
 
-  await page.getByRole("button", { name: "Skills" }).click();
+  await page.getByRole("button", { name: "技能", exact: true }).click();
   await page.waitForTimeout(2000);
   await shot(page, "04-skills-panel.png");
   const skillsText = await page.locator(".detail").innerText();
   console.log(
-    `05 skills panel: approved section ${/Approved \([1-9]/.test(skillsText) ? "non-empty" : "empty"}`,
+    `05 skills panel: approved section ${/已通过 \([1-9]/.test(skillsText) ? "non-empty" : "empty"}`,
   );
 
   console.log("BROWSER SMOKE OK");

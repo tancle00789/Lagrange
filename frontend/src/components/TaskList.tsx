@@ -9,8 +9,8 @@ interface Props {
 export default function TaskList({ tasks, selectedId, onSelect }: Props) {
   return (
     <div className="panel">
-      <h2>Tasks</h2>
-      {tasks.length === 0 && <p className="muted">No tasks yet.</p>}
+      <h2>任务</h2>
+      {tasks.length === 0 && <p className="muted">暂无任务。</p>}
       {tasks.map((task) => (
         <div
           key={task.task_id}

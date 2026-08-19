@@ -35,10 +35,10 @@ export default function TaskForm({ onCreated }: Props) {
 
   return (
     <div className="panel">
-      <h2>New Task</h2>
+      <h2>新建任务</h2>
       <textarea
         value={input}
-        placeholder="Ask a research question..."
+        placeholder="提出一个研究问题……"
         onChange={(e) => setInput(e.target.value)}
       />
       <label>
@@ -47,7 +47,7 @@ export default function TaskForm({ onCreated }: Props) {
           checked={requireApproval}
           onChange={(e) => setRequireApproval(e.target.checked)}
         />{" "}
-        require approval before completion
+        完成前需要人工审批
       </label>
       <label>
         <input
@@ -58,7 +58,7 @@ export default function TaskForm({ onCreated }: Props) {
             if (!e.target.checked) setIngestExternal(false);
           }}
         />{" "}
-        allow external literature search (arxiv/github/crossref/nature)
+        允许外部文献检索（arXiv / GitHub / CrossRef / Nature）
       </label>
       <label>
         <input
@@ -67,11 +67,11 @@ export default function TaskForm({ onCreated }: Props) {
           disabled={!allowExternal}
           onChange={(e) => setIngestExternal(e.target.checked)}
         />{" "}
-        ingest external PDFs into the knowledge base
+        将外部 PDF 灌入知识库
       </label>
       <div className="actions">
         <button disabled={busy || !input.trim()} onClick={() => void submit()}>
-          {busy ? "Creating..." : "Create task"}
+          {busy ? "创建中……" : "创建任务"}
         </button>
       </div>
       {error && <p className="error">{error}</p>}
