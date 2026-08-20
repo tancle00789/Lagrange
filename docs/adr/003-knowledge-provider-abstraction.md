@@ -1,14 +1,14 @@
-# ADR 003: KnowledgeProvider abstraction over WeKnora
+# ADR 003:WeKnora 之上的 KnowledgeProvider 抽象
 
-## Status
-Accepted for Phase 1.
+## 状态
+Phase 1 已采纳。
 
-## Context
-The final architecture treats WeKnora as an independent knowledge service. Phase 1 must not couple the echo runtime to WeKnora internals.
+## 背景
+最终架构把 WeKnora 视为独立的知识服务。Phase 1 不得把 echo 运行时耦合到 WeKnora 内部实现。
 
-## Decision
-Define a `KnowledgeProvider` Protocol with `search`, `get_chunks`, `ingest`, and `get_ingestion_status`. `WeKnoraKnowledgeProvider` is a client skeleton only; real retrieval is out of Phase 1 scope.
+## 决策
+定义包含 `search`、`get_chunks`、`ingest` 与 `get_ingestion_status` 的 `KnowledgeProvider` Protocol。`WeKnoraKnowledgeProvider` 仅为客户端骨架;真实检索不在 Phase 1 范围内。
 
-## Consequences
-- Later phases can implement hybrid retrieval against WeKnora without changing graph contracts.
-- Tests can use fake providers and must not call real model or knowledge services.
+## 影响
+- 后续阶段可以基于 WeKnora 实现混合检索而无需改动图契约。
+- 测试可以使用 fake provider,且不得调用真实的模型或知识服务。

@@ -1,48 +1,38 @@
-# ADR 011 — JWKS Authentication, Checkpoint RLS and Untrusted Evidence
+# ADR 011 — JWKS 认证、Checkpoint RLS 与不可信证据
 
-Status: accepted (Phase 08)
-Date: 2026-08-05
+状态:已采纳(Phase 08)
+日期:2026-08-05
 
-## Context
+## 背景
 
-The production boundary still depended on a deployment-shared HS256 secret,
-checkpoint tenant separation was enforced only by application identifiers, and
-retrieved text entered the answer prompt as prose. Those controls were useful
-for development but did not provide key rotation, database-enforced isolation,
-or an explicit boundary against indirect prompt injection.
+生产边界仍依赖部署级共享的 HS256 secret,checkpoint 的租户隔离仅靠应用
+层标识符强制,检索文本以散文形式直接进入回答 prompt。这些控制对开发
+够用,但不提供密钥轮换、数据库层强制的隔离,也没有针对间接提示注入的
+显式边界。
 
-## Decision
+## 决策
 
-- Production requires an HTTPS JWKS URL plus exact issuer and audience values.
-  Only RS256 and ES256 signing keys are accepted. Tokens require `kid`, `exp`,
-  `iat`, `sub`, `tenant_id`, `iss` and `aud`; an unknown `kid` triggers one
-  immediate JWKS refresh to support rotation. Development may retain HS256 and
-  explicit `dev:` tokens.
-- Tenant identifiers use a restricted character set. Queue execution checks the
-  envelope tenant and thread against the durable task record before invoking
-  LangGraph.
-- PostgreSQL checkpoint tables enable and force row-level security. A wrapper
-  validates `{tenant_id}:{task_id}` thread IDs, serializes operations on the
-  saver connection, and sets `pk_agent.tenant_id` transaction-locally before
-  every read/write/delete. RLS compares that value with the thread tenant
-  prefix. Returned checkpoint configs retain the tenant context.
-- Internal snippets and external metadata are serialized as bounded JSONL in a
-  clearly labelled untrusted evidence section. Known model-control token syntax
-  is neutralized and instruction-like evidence emits a detection event.
-- Prompt hardening is defense in depth: the answer model cannot choose or call
-  tools, output is parsed as data, and the citation gate accepts only IDs that
-  were actually retrieved.
+- 生产要求 HTTPS JWKS URL 加精确的 issuer 与 audience。只接受 RS256 与
+  ES256 签名密钥。令牌必须含 `kid`、`exp`、`iat`、`sub`、`tenant_id`、
+  `iss`、`aud`;未知 `kid` 触发一次即时 JWKS 刷新以支持轮换。开发环境
+  可保留 HS256 与显式 `dev:` 令牌。
+- 租户标识符使用受限字符集。队列执行在调用 LangGraph 之前,先对照持久
+  任务记录校验信封中的租户与 thread。
+- PostgreSQL checkpoint 表启用并强制行级安全(RLS)。包装器校验
+  `{tenant_id}:{task_id}` 形式的 thread ID,串行化 saver 连接上的操作,
+  并在每次读/写/删之前以事务级方式设置 `pk_agent.tenant_id`。RLS 将该
+  值与 thread 的租户前缀比较。返回的 checkpoint config 保留租户上下文。
+- 内部片段与外部元数据序列化为有界 JSONL,放入明确标注的不可信证据区。
+  已知的模型控制符语法被中和;疑似指令的证据触发检测事件。
+- Prompt 加固是纵深防御:回答模型无法选择或调用工具,输出按数据解析,
+  引用门只接受真实检索到的 ID。
 
-## Consequences
+## 影响
 
-- Identity-provider key rotation no longer requires redeploying a shared
-  symmetric secret. JWKS availability is required only on cache miss/expiry.
-- A missing tenant database context sees no checkpoint rows, including for the
-  table owner because RLS is forced. Cross-tenant config mismatches fail before
-  SQL execution.
-- Prompt-injection detection is intentionally a signal, not a claim that text
-  classification is perfect. Suspicious evidence may still be used as factual
-  data, but cannot alter tool routing or bypass citation validation.
-- Real identity-provider and PostgreSQL policy behavior must still be exercised
-  during the final deployed-environment verification.
-
+- 身份提供商的密钥轮换不再需要重新部署共享对称 secret。JWKS 只在缓存
+  未命中/过期时需要可达。
+- 缺失租户数据库上下文时看不到任何 checkpoint 行 —— 表的所有者也不
+  例外,因为 RLS 是强制的。跨租户 config 不匹配在 SQL 执行之前就失败。
+- 提示注入检测有意只是一个信号,而不是声称文本分类完美。可疑证据仍可
+  作为事实数据使用,但无法改变工具路由或绕过引用校验。
+- 真实身份提供商与 PostgreSQL 策略行为仍必须在最终部署环境验证中实测。

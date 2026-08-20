@@ -1,57 +1,40 @@
-# WeKnora Subsystem Operations Runbook
+# WeKnora 子系统运维手册
 
-## Layout
+## 布局
 
-| Service | Role | Network | Host port |
+| 服务 | 角色 | 网络 | 主机端口 |
 |---|---|---|---|
 | `weknora-app` | WeKnora Go API | `weknora-net` | `127.0.0.1:8081` |
-| `weknora-docreader` | parsing gRPC sidecar | `weknora-net` | none |
-| `weknora-postgres` | ParadeDB (vector + keyword) | `weknora-net` | none |
-| `weknora-redis` | queue/cache | `weknora-net` | none |
-| `app` (pk_agent) | only service bridging both networks | `pk-agent-net`, `weknora-net` | `8000` |
+| `weknora-docreader` | 解析 gRPC sidecar | `weknora-net` | 无 |
+| `weknora-postgres` | ParadeDB（向量 + 关键词） | `weknora-net` | 无 |
+| `weknora-redis` | 队列/缓存 | `weknora-net` | 无 |
+| `app`（pk_agent） | 唯一同时桥接两个网络的服务 | `pk-agent-net`、`weknora-net` | `8000` |
 
-WeKnora source is build-mounted read-only from `../WeKnora`; the repo itself
-is never modified.
+WeKnora 源码通过只读方式 build-mount 自 `../WeKnora`；仓库本身不会被修改。
 
-## Bring-up
+## 启动
 
 ```bash
 docker compose up -d --build
-docker compose logs -f weknora-app        # wait for healthy
-python scripts/init_weknora.py            # prints PK_AGENT_WEKNORA_API_KEY / _DEFAULT_KB_ID
-export PK_AGENT_WEKNORA_API_KEY=...       # from script stdout
+docker compose logs -f weknora-app        # 等待 healthy
+python scripts/init_weknora.py            # 输出 PK_AGENT_WEKNORA_API_KEY / _DEFAULT_KB_ID
+export PK_AGENT_WEKNORA_API_KEY=...       # 来自脚本 stdout
 export PK_AGENT_WEKNORA_DEFAULT_KB_ID=...
-docker compose up -d app                  # restart app with the key
-bash scripts/smoke_test_weknora.sh        # optional real integration check
+docker compose up -d app                  # 用 key 重启 app
+bash scripts/smoke_test_weknora.sh        # 可选的真实集成检查
 ```
 
-## Prerequisites
+## 前置条件
 
-- An embedding model reachable from the `weknora-app` container. Default is
-  Ollama on the host (`http://host.docker.internal:11434`, model `bge-m3`).
-  Override with `WEKNORA_EMBEDDING_MODEL` / `WEKNORA_EMBEDDING_BASE_URL` /
-  `WEKNORA_EMBEDDING_PROVIDER` before running `init_weknora.py`.
-- Without a reachable embedding model, ingestion will fail at the embedding
-  step and hybrid search returns nothing.
+- `weknora-app` 容器必须能访问一个嵌入模型。默认使用宿主机上的 Ollama（`http://host.docker.internal:11434`，模型 `bge-m3`）。运行 `init_weknora.py` 前，可通过 `WEKNORA_EMBEDDING_MODEL` / `WEKNORA_EMBEDDING_BASE_URL` / `WEKNORA_EMBEDDING_PROVIDER` 覆盖。
+- 如果嵌入模型不可达，ingestion 会在嵌入步骤失败，且混合搜索不会返回结果。
 
-## Common failures
+## 常见故障
 
-- **`knowledge_degraded` events / empty hits**: weknora-app down or slow.
-  Check `docker compose ps weknora-app` and its logs. Tasks still complete
-  (ADR 004 degradation policy).
-- **Task fails with `KnowledgeAuthError`**: API key missing/revoked or
-  `PK_AGENT_WEKNORA_DEFAULT_KB_ID` unset. Re-run `init_weknora.py` and restart
-  `app` with fresh env.
-- **Ingestion stuck in `pending`**: docreader not ready, or embedding model
-  unreachable from the container. Verify
-  `docker compose exec weknora-app curl -sf http://host.docker.internal:11434/api/tags`.
-- **`hybrid-search` returns `{"data":null}` and logs `No retrievable indexing
-  pipelines`**: `RETRIEVE_DRIVER` was unset on weknora-app, so no retrieval
-  engine registered at boot. Compose now sets `RETRIEVE_DRIVER=postgres`; for
-  a deployment that booted without it, add the env and restart, then repair
-  the skipped conditional migrations (WeKnora's `000002_embeddings` is
-  silently skipped when the driver is unset at first boot, yet recorded as
-  applied). All three are idempotent:
+- **`knowledge_degraded` 事件 / 空命中**：weknora-app 宕机或响应慢。检查 `docker compose ps weknora-app` 及其日志。任务仍会完成（ADR 004 降级策略）。
+- **任务失败并报 `KnowledgeAuthError`**：API key 缺失/撤销，或 `PK_AGENT_WEKNORA_DEFAULT_KB_ID` 未设置。重新运行 `init_weknora.py`，并用新的环境变量重启 `app`。
+- **Ingestion 卡在 `pending`**：docreader 未就绪，或容器内无法访问嵌入模型。验证 `docker compose exec weknora-app curl -sf http://host.docker.internal:11434/api/tags`。
+- **`hybrid-search` 返回 `{"data":null}` 并日志输出 `No retrievable indexing pipelines`**：`RETRIEVE_DRIVER` 在 weknora-app 上未设置，因此启动时没有注册检索引擎。Compose 现在已设置 `RETRIEVE_DRIVER=postgres`；对于未设置该变量就启动的部署，需添加该环境变量并重启，然后修复被跳过的条件迁移（WeKnora 的 `000002_embeddings` 在首次启动时驱动未设置会被静默跳过，但仍被记录为已应用）。以下三条都是幂等的：
   ```bash
   docker exec -i <weknora-postgres> psql -U weknora -d weknora \
     -c "SET app.skip_embedding='false';" \
@@ -61,15 +44,10 @@ bash scripts/smoke_test_weknora.sh        # optional real integration check
   docker exec -i <weknora-postgres> psql -U weknora -d weknora \
     -f - < ../WeKnora/migrations/versioned/000059_embeddings_hnsw_1024.up.sql
   ```
-  Symptom of the missing table: ingestion fails with
-  `relation "embeddings" does not exist` / `column "tag_id" does not exist`.
-- **Key rotation**: create a new key via
-  `POST /api/v1/tenants/{id}/api-keys` (see `scripts/init_weknora.py`), update
-  `PK_AGENT_WEKNORA_API_KEY`, restart `app`. Keys are never logged by pk_agent.
+  缺少表的症状：ingestion 失败并提示 `relation "embeddings" does not exist` / `column "tag_id" does not exist`。
+- **Key rotation**：通过 `POST /api/v1/tenants/{id}/api-keys` 创建新 key（参见 `scripts/init_weknora.py`），更新 `PK_AGENT_WEKNORA_API_KEY`，重启 `app`。pk_agent 不会记录 key。
 
-## Data
+## 数据
 
-- WeKnora data lives in the `weknora-pgdata` and `weknora-data-files` volumes.
-  pk_agent checkpoints live in the `db` service — completely separate.
-- `docker compose down -v` destroys both; there is no backup automation in
-  Phase 2.
+- WeKnora 数据保存在 `weknora-pgdata` 与 `weknora-data-files` 卷中。pk_agent checkpoint 保存在 `db` 服务中 —— 两者完全隔离。
+- `docker compose down -v` 会销毁两者；Phase 2 没有自动备份机制。

@@ -1,46 +1,40 @@
-# ADR 008 — Durable Task Control Plane and Cancellation Semantics
+# ADR 008 — 持久化任务控制面与取消语义
 
-Status: accepted (Phase 06)
-Date: 2026-08-05
+状态:已采纳(Phase 06)
+日期:2026-08-05
 
-## Context
+## 背景
 
-Task records and idempotency mappings lived in process-local dictionaries.
-Restarting the API erased task visibility, and separate replicas could not see
-one another's records. `DELETE /tasks/{id}` changed the displayed status but
-did not cancel the `asyncio.Task` running LangGraph, so a late graph result
-could overwrite `cancelled` with `completed`.
+任务记录与幂等映射此前存在进程内字典中。重启 API 会抹掉任务可见性,
+多个副本也互相看不到对方的记录。`DELETE /tasks/{id}` 改变了展示状态,
+但并不取消正在运行 LangGraph 的 `asyncio.Task`,因此迟到的图结果可能
+把 `cancelled` 覆盖回 `completed`。
 
-LangGraph checkpoints were already durable in PostgreSQL, but the HTTP control
-plane had no durable index connecting tenants to those executions.
+LangGraph checkpoint 在 PostgreSQL 中已经是持久的,但 HTTP 控制面没有
+把租户关联到这些执行的持久索引。
 
-## Decision
+## 决策
 
-- Introduce an asynchronous `TaskStore` boundary with memory and Redis
-  implementations. Memory remains the test/single-process default; production
-  startup requires `PK_AGENT_RUNTIME_STORE=redis`.
-- Redis stores bounded JSON task records, a per-tenant sorted task index, and
-  SHA-256-hashed tenant/idempotency mappings. Task retention defaults to seven
-  days and idempotency retention to one day.
-- Status writes support expected-source-state checks using a lock in memory and
-  Redis WATCH transactions. A graph result can write only from `running`; it
-  cannot overwrite a concurrent terminal state.
-- Each API process tracks the `asyncio.Task` objects it owns. Cancellation first
-  atomically transitions active state to `cancelled`, then calls `cancel()` on
-  the locally-owned coroutine. Shutdown cancels owned work and records an
-  interrupted run as failed instead of leaving it indefinitely running.
-- Docker Compose gets a dedicated append-only Redis service for pk-agent. It is
-  separate from WeKnora's private Redis subsystem.
+- 引入异步 `TaskStore` 边界,含内存与 Redis 两种实现。内存仍是测试/
+  单进程默认;生产启动要求 `PK_AGENT_RUNTIME_STORE=redis`。
+- Redis 保存有界的 JSON 任务记录、按租户排序的任务索引,以及经
+  SHA-256 哈希的租户/幂等映射。任务记录默认保留七天,幂等映射保留
+  一天。
+- 状态写入支持期望源状态校验:内存实现用锁,Redis 用 WATCH 事务。图
+  结果只能从 `running` 写入;无法覆盖并发的终态。
+- 每个 API 进程追踪自己持有的 `asyncio.Task`。取消先把活跃状态原子
+  迁移为 `cancelled`,再对本地持有的协程调用 `cancel()`。关闭时取消
+  持有的工作,并把被中断的运行记为失败,而不是无限期停留在 running。
+- Docker Compose 增加一个 pk-agent 专用的 append-only Redis 服务。它与
+  WeKnora 的私有 Redis 子系统相互独立。
 
-## Consequences
+## 影响
 
-- Task listing, status and idempotent creation survive API restarts for the
-  configured retention period.
-- Local cancellation now stops model/retrieval awaits and cannot be reversed by
-  a late completion write.
-- If a cancel request reaches a different replica, shared state still becomes
-  `cancelled` and rejects late completion, but the owning replica cannot yet be
-  signalled to release compute immediately. A shared worker queue/control
-  channel is required for full distributed cancellation.
-- Redis currently stores small task/report metadata only. Documents and PDFs
-  remain owned by WeKnora; graph checkpoints remain owned by PostgreSQL.
+- 任务列表、状态与幂等创建在配置保留期内可跨 API 重启存活。
+- 本地取消现在会真正停止模型/检索的 await,且无法被迟到的完成写入
+  逆转。
+- 如果取消请求打到另一个副本,共享状态仍会变为 `cancelled` 并拒绝迟到
+  的完成写入,但持有计算的副本暂时无法被通知立即释放算力。完整的
+  分布式取消需要共享 worker 队列/控制频道。
+- Redis 目前只存小体量任务/报告元数据。文档与 PDF 仍归 WeKnora 所有;
+  图 checkpoint 仍归 PostgreSQL 所有。

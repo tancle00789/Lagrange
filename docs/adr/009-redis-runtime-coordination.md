@@ -1,40 +1,34 @@
-# ADR 009 — Redis Runtime Coordination Across API Replicas
+# ADR 009 — 跨 API 副本的 Redis 运行时协调
 
-Status: accepted (Phase 06B)
-Date: 2026-08-05
+状态:已采纳(Phase 06B)
+日期:2026-08-05
 
-## Context
+## 背景
 
-Phase 06 moved task and idempotency records to Redis, but live coordination
-remained process-local: rate limits, SSE tickets, event subscriptions and
-coroutine cancellation. Multiple API replicas could therefore exceed the
-configured aggregate rate, could not serve one another's SSE connections, and
-could not immediately stop work owned by another process.
+Phase 06 把任务与幂等记录迁到了 Redis,但实时协调仍是进程内的:限流、
+SSE ticket、事件订阅与协程取消。多个 API 副本因此可能突破配置的总速率,
+无法互相服务对方的 SSE 连接,也无法立即停止其他进程持有的工作。
 
-## Decision
+## 决策
 
-- Redis runtime mode now selects Redis implementations for all four live
-  coordination concerns. Memory implementations remain available for isolated
-  tests and single-process development.
-- Rate limiting uses a tenant-hashed, one-second fixed window and an atomic
-  Redis transaction. The configured RPS is therefore enforced across replicas.
-- SSE tickets are stored with Redis TTL and consumed with `GETDEL`. A ticket
-  issued by one replica can establish an event stream on another and cannot be
-  replayed.
-- Agent events use task-scoped Redis Pub/Sub channels. Task state remains the
-  durable source of truth; SSE sends a persisted snapshot before subscribing.
-- Every Redis-backed API process subscribes to a cancellation control channel.
-  A cancel request first commits the shared terminal state and then publishes
-  the task ID. The process owning that `asyncio.Task` calls `cancel()`.
+- Redis 运行时模式现在为全部四个实时协调关注点选用 Redis 实现。内存
+  实现仍可用于隔离测试与单进程开发。
+- 限流使用租户哈希后的一秒固定窗口与原子 Redis 事务。配置的 RPS 因此
+  跨副本生效。
+- SSE ticket 带 Redis TTL 存储,用 `GETDEL` 消费。一个副本签发的 ticket
+  可以在另一个副本上建立事件流,且无法重放。
+- Agent 事件使用按任务划分的 Redis Pub/Sub 频道。任务状态仍是持久化的
+  事实来源;SSE 在订阅前先发送持久化快照。
+- 每个 Redis 模式下的 API 进程订阅一条取消控制频道。取消请求先提交
+  共享终态,再发布任务 ID。持有该 `asyncio.Task` 的进程调用
+  `cancel()`。
 
-## Consequences
+## 影响
 
-- API replicas now share rate budgets, tickets, live events and cancellation
-  control without sticky routing.
-- Pub/Sub is intentionally ephemeral. A disconnected client reconstructs state
-  from the task snapshot/list API; Redis task records, not events, are durable.
-- Cancellation remains safe if a control message is lost because the terminal
-  Redis transition rejects late result writes. The owner may continue consuming
-  compute until its current operation returns if it missed the message.
-- This is not a durable worker queue. API process loss marks locally interrupted
-  work failed; automatic lease/retry/reassignment remains a later phase.
+- API 副本现在共享速率预算、ticket、实时事件与取消控制,无需粘性路由。
+- Pub/Sub 是有意的易失设计。断连的客户端从任务快照/列表 API 重建状态;
+  持久的是 Redis 任务记录,不是事件。
+- 取消控制消息丢失时取消仍然安全,因为 Redis 终态迁移拒绝迟到的结果
+  写入。错过消息的持有者可能在当前操作返回前继续消耗算力。
+- 这不是持久化 worker 队列。API 进程丢失会把本地被中断的工作标记为
+  失败;自动租约/重试/重新指派属于后续阶段。

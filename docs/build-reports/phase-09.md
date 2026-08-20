@@ -1,34 +1,27 @@
-# Phase 09 Build Report — Distributed Observability
+# 阶段 09 构建报告 — 分布式可观测性
 
 Date: 2026-08-05
 
-## Scope delivered
+## 交付范围
 
-- Added correlated JSON logging with request/task/tenant-hash and trace/span
-  context plus credential redaction.
-- Added request-ID validation/propagation and bounded route-template metrics.
-- Added per-replica Prometheus HTTP/job counters, latency histograms and an
-  active-job gauge at `/metrics`.
-- Added OpenTelemetry server and consumer spans with W3C context carried through
-  the durable Redis job envelope across replicas.
-- Added optional OTLP/HTTP export, Prometheus scrape config, alert rules, ADR 012
-  and an operations runbook.
+- 新增结构化 JSON 日志，包含 request/task/tenant-hash、trace/span 上下文以及凭据脱敏。
+- 新增请求 ID 校验/透传和受限路由模板指标。
+- 新增每个副本的 Prometheus HTTP/Job 计数器、延迟直方图以及 `/metrics` 端点的活跃任务 gauge。
+- 新增 OpenTelemetry 服务端与消费者 span，W3C 上下文通过跨副本的持久化 Redis 任务信封携带。
+- 新增可选 OTLP/HTTP 导出、Prometheus 抓取配置、告警规则、ADR 012 以及运维 runbook。
 
-## Verification
+## 验证
 
-| Gate | Result |
+| 门禁 | 结果 |
 |---|---|
 | Dependency lock | ok, 89 packages |
 | `ruff check --no-cache src tests` | ok |
 | `mypy src` | ok, 51 source files |
-| Focused observability/runtime tests | 11 passed |
-| Full pytest outside restricted WSL sandbox | 103 passed |
+| 聚焦可观测性/运行时测试 | 11 passed |
+| 在受限 WSL 沙箱外完整 pytest | 103 passed |
 
-Tests cover credential redaction, correlation fields, trace IDs, trace-context
-injection, bounded metric labels, request-ID echo and job metric/gauge behavior.
+测试覆盖凭据脱敏、关联字段、trace ID、trace-context 注入、受限指标标签、请求 ID 回显以及任务指标/gauge 行为。
 
-## Explicit boundary
+## 明确边界
 
-The repository supplies signal production and alert contracts. A deployed
-Prometheus and OTLP collector/backend are environment concerns and will be
-validated with the final Docker deployment where available.
+本仓库提供信号生成与告警契约。已部署的 Prometheus 和 OTLP collector/backend 属于环境层面事项，将在最终 Docker 部署可用时进行验证。

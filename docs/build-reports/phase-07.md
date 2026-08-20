@@ -1,36 +1,33 @@
-# Phase 07 Build Report — Durable Worker Leases and Recovery
+# Phase 07 构建报告 —— 持久化 worker 租约与恢复
 
-Date: 2026-08-05
+日期:2026-08-05
 
-## Scope delivered
+## 交付范围
 
-- Added a Redis Streams consumer-group queue for Redis runtime mode.
-- Added compact job envelopes, configurable worker concurrency, bounded
-  persisted attempts, retry state, heartbeat lease renewal, `XAUTOCLAIM`
-  takeover and terminal `XACK` semantics.
-- Changed graceful shutdown from terminal failure to recoverable `retrying`;
-  hard process loss is recovered from the pending-entry list after lease expiry.
-- Kept user cancellation terminal across replicas and prevented recovered
-  deliveries from overwriting terminal task state.
-- Added worker error containment so an unexpected delivery failure leaves the
-  entry recoverable without permanently killing the consumer loop.
-- Added ADR 010 and a Redis worker operations runbook.
+- 为 Redis 运行时模式新增 Redis Streams 消费者组队列。
+- 新增紧凑任务信封、可配置 worker 并发、有界持久化尝试次数、重试状态、
+  心跳租约续期、`XAUTOCLAIM` 接管与终态 `XACK` 语义。
+- 优雅关闭从终态失败改为可恢复的 `retrying`;硬进程丢失在租约到期后
+  从 pending entry 列表恢复。
+- 用户取消跨副本保持终态,恢复的投递无法覆盖任务终态。
+- 新增 worker 错误遏制:意外的投递失败让 entry 保持可恢复,而不会永久
+  杀死消费者循环。
+- 新增 ADR 010 与 Redis worker 运维手册。
 
-## Verification
+## 验证
 
-| Gate | Result |
+| 关卡 | 结果 |
 |---|---|
 | `ruff check --no-cache src tests` | ok |
-| `mypy src` | ok, 49 source files |
-| Queue/execution/coordination focused tests | 12 passed |
-| Full pytest outside restricted WSL sandbox | 92 passed |
+| `mypy src` | ok,49 个源文件 |
+| 队列/执行/协调聚焦测试 | 12 passed |
+| 受限 WSL 沙箱外的完整 pytest | 92 passed |
 
-Focused coverage proves stream round-trip and ACK, transient retries, maximum
-attempt failure, idle-entry crash recovery, shutdown takeover, consumer survival
-after unexpected errors, and cross-replica cancellation with shared workers.
+聚焦覆盖证明了 stream 往返与 ACK、瞬态重试、最大尝试次数失败、空闲
+entry 崩溃恢复、关闭接管、意外错误后消费者存活,以及共享 worker 下的
+跨副本取消。
 
-## Explicit boundary
+## 显式边界
 
-The runtime provides at-least-once delivery, not exactly-once side effects.
-External-write tools must supply their own idempotency contract. Real Redis and
-container deployment remain part of the final environment verification phase.
+运行时提供至少一次投递,而非精确一次副作用。外部写工具必须自带幂等
+契约。真实 Redis 与容器部署仍属于最终环境验证阶段。

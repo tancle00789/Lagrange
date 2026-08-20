@@ -1,57 +1,41 @@
-# Phase 14 Build Report — Frontend Skills Panel + Suggested-Case Persistence
+# 阶段 14 构建报告 — 前端 Skills 面板 + 建议用例持久化
 
 Date: 2026-08-17
 ADR: `docs/adr/014-skill-system.md`
 Depends on: phase-12 (skill system), phase-13 (deployment verification)
 
-## Scope
+## 范围
 
-Make the skill lifecycle usable day-to-day: a real UI instead of curl, and
-persistence for distill-suggested eval cases so "one-click evaluate" works
-long after the distill response is gone.
+让 skill 生命周期可日常可用：用真实 UI 替代 curl，并将 distill 建议的评估用例持久化，使"一键评估"在 distill 响应消失很久后仍能工作。
 
-## Delivered
+## 交付内容
 
-### Backend
-- `SkillRecord.suggested_eval_cases` (≤5, persisted in the JSONB payload —
-  backward compatible, old records default to empty). Distillation embeds
-  the cases directly into the candidate record.
-- `POST .../evaluate` body `cases` is now optional: empty falls back to the
-  record's suggested cases (422 if neither exists). Explicit cases still
-  override — the smoke script's constructed case is unaffected.
+### 后端
+- `SkillRecord.suggested_eval_cases`（≤5，持久化在 JSONB payload 中 —— 向后兼容，旧记录默认为空）。Distillation 直接将用例嵌入候选记录。
+- `POST .../evaluate` 的 body `cases` 现为可选：为空时回退到记录的建议用例（两者皆无则 422）。显式用例仍优先 —— 冒烟脚本中的构造用例不受影响。
 
-### Frontend (`frontend/src`)
-- **Skills tab** (App-level Tasks/Skills tabs): `SkillsPanel` with three
-  sections — Approved / Testing (awaiting approval) / Candidates.
-  - Candidate → "Evaluate (N cases)" runs the suggested cases and shows
-    pass/fail per case with failure reasons inline.
-  - Testing → pass-rate badge; "Approve" enabled only after a passing
-    evaluation (mirrors the backend gate); re-evaluate possible.
-  - Any non-deprecated record → "Deprecate".
-  - Status badges reuse the task-status palette (approved=green,
-    testing=amber, candidate=blue, deprecated=red).
-- **Task detail**: completed tasks get a "Distill skill" button; the result
-  note points to the Skills tab (or reports "not generalizable").
-- SSE timeline subscribes to the new `skills_matched` event type.
-- api.ts/types.ts: full skill API surface + types.
+### 前端 (`frontend/src`)
+- **Skills 标签页**（应用级 Tasks/Skills 标签）：`SkillsPanel` 分三栏 —— Approved / Testing（待审批）/ Candidates。
+  - Candidate → "Evaluate (N cases)" 运行建议用例并逐条显示通过/失败及失败原因。
+  - Testing → 通过率徽章；仅在评估通过后才启用 "Approve"（与后端门禁一致）；可重新评估。
+  - 任何非 deprecated 记录 → "Deprecate"。
+  - 状态徽章复用任务状态色板（approved=green、testing=amber、candidate=blue、deprecated=red）。
+- **任务详情**：已完成任务显示 "Distill skill" 按钮；结果提示指向 Skills 标签页（或报告 "not generalizable"）。
+- SSE timeline 订阅新的 `skills_matched` 事件类型。
+- api.ts/types.ts：完整 skill API 接口与类型。
 
-### Hygiene
-- `npm audit fix`: nanoid high-severity advisory → 0 vulnerabilities.
-- `tsc -b && vite build` clean.
+### 卫生
+- `npm audit fix`：nanoid 高危公告 → 0 vulnerabilities。
+- `tsc -b && vite build` clean。
 
-## Verification
+## 验证
 
-- `pytest`: 161 passed, 1 skipped (torch local) — full suite green.
-- `ruff` / `mypy`: clean.
-- `scripts/smoke_test_skills.sh` against the rebuilt compose stack:
-  **EXIT 0** — distill now succeeds on the first attempt (prompt
-  clarification about block names vs tool names held), and the deprecated
-  record in Postgres carries 3 persisted suggested eval cases.
-- UI served from the app container at `/` (static build baked into image).
+- `pytest`：161 passed, 1 skipped（torch local）—— 完整套件通过。
+- `ruff` / `mypy`：clean。
+- 针对重建后的 compose 栈运行 `scripts/smoke_test_skills.sh`：**EXIT 0** —— distill 首次尝试即成功（关于 block names 与 tool names 的提示词澄清生效），Postgres 中 deprecated 记录带有 3 条持久化的建议评估用例。
+- UI 从应用容器 `/` 提供（静态构建已烘焙进镜像）。
 
-## Known limits
+## 已知限制
 
-- The panel evaluates with suggested cases only; a case editor UI is future
-  work (the API already accepts explicit cases).
-- Multi-replica registry refresh is still unwired (single-replica refresh
-  on approve/deprecate happens inline).
+- 面板仅使用建议用例进行评估；用例编辑器 UI 是后续工作（API 已接受显式用例）。
+- 多副本注册表刷新仍未接入（approve/deprecate 的单副本刷新是内联执行的）。

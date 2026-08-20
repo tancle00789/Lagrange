@@ -1,76 +1,71 @@
-# Phase 03 Build Report — Minimal Knowledge Workflow + Web UI
+# Phase 03 构建报告 —— 最小知识工作流 + Web UI
 
-Date: 2026-08-04
+日期:2026-08-04
 
-## Scope delivered
+## 交付范围
 
-- Research graph replacing the echo graph:
+- 研究图替换 echo 图:
   `normalize → retrieve_internal → generate_grounded_answer → citation_gate → finalize`
-  (`src/pk_agent/graph/research_graph.py`). Echo graph deleted.
-- Async model layer: `Model.generate` is now async; `ModelRouter` routes by
-  capability (`"answer"`). New `OllamaModel` (`harness/ollama.py`) calls host
-  Ollama `/api/chat` with timeout + single transport retry. ADR 005.
-- `PromptAssembler.build_answer_prompt` instructs strict JSON
-  `{answer, claims:[{text, chunk_ids}]}`; `_parse_model_output` strips code
-  fences and degrades to plain text on parse failure.
-- `citation_gate` drops chunk_ids not present in `knowledge_hits`
-  (counted in `dropped_citations`), synthesizes one claim from the top hit
-  when the model produced none, and marks `grounded=False` when no evidence
-  was retrieved.
-- Domain models (`domain/research.py`): Evidence / Claim / Report. Graph
-  state carries only small objects (≤500-char snippets, ≤300-char claims).
-- API: `GET /api/v1/tasks` (tenant-scoped, newest-first, limit 100),
-  `report` on `TaskStatusResponse`, CORS for the Vite dev origin, static SPA
-  hosting from `/app/static` (or `frontend/dist` in dev).
-- SSE auth: `?token=` query fallback added to `get_current_principal`
-  (EventSource cannot set headers; threat model notes the dev-only trade-off).
-- Frontend (`frontend/`, React 18 + Vite 5 + TS, dark theme, no component
-  library): TokenGate, TaskForm (with require_approval), TaskList (5s poll),
-  TaskDetail (SSE event timeline, knowledge hits, report with per-claim
-  citation validity, approve/reject via resume, cancel). Multi-stage
-  Dockerfile builds the SPA into the app image; no extra compose service.
+  (`src/pk_agent/graph/research_graph.py`)。echo 图已删除。
+- 异步模型层:`Model.generate` 改为 async;`ModelRouter` 按能力路由
+  (`"answer"`)。新增 `OllamaModel`(`harness/ollama.py`)调用宿主机
+  Ollama `/api/chat`,带超时 + 单次传输重试。ADR 005。
+- `PromptAssembler.build_answer_prompt` 要求严格 JSON
+  `{answer, claims:[{text, chunk_ids}]}`;`_parse_model_output` 剥除代码
+  围栏,解析失败降级为纯文本。
+- `citation_gate` 丢弃不在 `knowledge_hits` 中的 chunk_id(计入
+  `dropped_citations`),模型没有产出任何 claim 时从 top hit 合成一条,
+  未检索到证据时标记 `grounded=False`。
+- 领域模型(`domain/research.py`):Evidence / Claim / Report。图 state
+  只携带小对象(≤500 字符片段,≤300 字符 claim)。
+- API:`GET /api/v1/tasks`(按租户、最新在前、上限 100)、
+  `TaskStatusResponse` 上的 `report`、对 Vite 开发源开放 CORS、从
+  `/app/static`(开发时 `frontend/dist`)托管静态 SPA。
+- SSE 认证:`get_current_principal` 增加 `?token=` 查询回退
+  (EventSource 无法设置请求头;威胁模型记录了仅限开发的权衡)。
+- 前端(`frontend/`,React 18 + Vite 5 + TS,暗色主题,无组件库):
+  TokenGate、TaskForm(含 require_approval)、TaskList(5 秒轮询)、
+  TaskDetail(SSE 事件时间线、知识命中、带逐条引用有效性的报告、
+  经 resume 批准/拒绝、取消)。多阶段 Dockerfile 把 SPA 构建进 app
+  镜像;不增加 compose 服务。
 
-## Verification (all real, this machine)
+## 验证(全部为真实验证,本机)
 
-| Gate | Result |
+| 关卡 | 结果 |
 |---|---|
 | `uv sync --frozen` | ok |
 | `ruff check src tests` | ok |
-| `mypy src` | ok, 32 files |
-| `pytest` | 28 passed (research graph happy/paused/parse-degradation/gate branches, provider contract, retrieval degradation, API incl. list + approve flow) |
-| `npm run build` (frontend) | ok (tsc + vite) |
-| `docker compose up -d --build app` | ok; SPA served at `http://localhost:8000/` |
+| `mypy src` | ok,32 个文件 |
+| `pytest` | 28 passed(研究图 happy/暂停/解析降级/引用门分支、provider 契约、检索降级、API 含列表 + 批准流) |
+| `npm run build`(前端) | ok(tsc + vite) |
+| `docker compose up -d --build app` | ok;SPA 服务于 `http://localhost:8000/` |
 | `scripts/smoke_test.sh` | ok |
-| Real LLM: `PK_AGENT_OLLAMA_CHAT_MODEL=qwen3:4b` + `scripts/smoke_test_weknora.sh` | ok — real chunk in `knowledge_hits`, grounded report; answer produced by qwen3:4b with 1 verified claim, 0 dropped citations |
-| SSE `?token=` auth | verified via curl (`snapshot` event received) |
+| 真实 LLM:`PK_AGENT_OLLAMA_CHAT_MODEL=qwen3:4b` + `scripts/smoke_test_weknora.sh` | ok —— `knowledge_hits` 中有真实 chunk、报告有据可依;qwen3:4b 产出答案,1 条已验证 claim,0 条被丢弃引用 |
+| SSE `?token=` 认证 | 经 curl 验证(收到 `snapshot` 事件) |
 
-Note on ollama: `registry.ollama.ai` was unreachable (TLS timeout), so
-qwen3:4b was pulled via ModelScope (`modelscope.cn/unsloth/Qwen3-4B-GGUF:Q4_K_M`)
-and tagged locally as `qwen3:4b`. Docker base images similarly came via the
-DaoCloud mirror.
+关于 ollama 的说明:`registry.ollama.ai` 不可达(TLS 超时),因此
+qwen3:4b 经 ModelScope(`modelscope.cn/unsloth/Qwen3-4B-GGUF:Q4_K_M`)
+拉取并本地打标为 `qwen3:4b`。Docker 基础镜像同样经 DaoCloud 镜像站。
 
-## Incidents found and fixed during this phase
+## 本阶段发现并修复的事故
 
-1. **Phase 2 smoke was a false positive.** It asserted the marker in
-   `result`, but the echo graph echoed the query (which contained the marker),
-   so it passed while retrieval was silently broken. The Phase 3 assertion
-   checks `knowledge_hits` and `report.grounded` — the smoke now proves real
-   retrieval.
-2. **WeKnora retrieval was silently dead since Phase 2.** `RETRIEVE_DRIVER`
-   was unset on weknora-app, so no retrieval engine registered and
-   `hybrid-search` always returned `{"data":null}` with HTTP 200. Fixed in
-   compose (`RETRIEVE_DRIVER=postgres`).
-3. **Skipped conditional migrations.** WeKnora's `000002_embeddings` (and the
-   `000007` tag_id column) are gated on `app.skip_embedding`, which was true
-   at first boot; golang-migrate still recorded them as applied. Repaired by
-   applying the idempotent SQL manually; documented in
-   `docs/runbooks/weknora-ops.md`.
+1. **Phase 2 的 smoke 是假阳性。** 它断言标记串出现在 `result` 中,但
+   echo 图会回显查询(其中包含标记串),因此检索静默坏掉时它照样通过。
+   Phase 3 的断言改为检查 `knowledge_hits` 与 `report.grounded` ——
+   smoke 现在真正证明检索发生。
+2. **WeKnora 检索自 Phase 2 起一直静默失效。** weknora-app 上没有设置
+   `RETRIEVE_DRIVER`,没有注册任何检索引擎,`hybrid-search` 总是以
+   HTTP 200 返回 `{"data":null}`。已在 compose 中修复
+   (`RETRIEVE_DRIVER=postgres`)。
+3. **被跳过的条件迁移。** WeKnora 的 `000002_embeddings`(以及 `000007`
+   的 tag_id 列)由 `app.skip_embedding` 门控,首次启动时它为 true;
+   golang-migrate 仍把它们记录为已应用。通过手动执行幂等 SQL 修复;
+   已记录在 `docs/runbooks/weknora-ops.md`。
 
-## Not done / caveats
+## 未做 / 注意事项
 
-- Browser click-through of the SPA was verified at the HTTP level (SPA
-  served, API + SSE + auth working); visual interaction should be sanity
-  checked once at `http://localhost:8000/`.
-- qwen3:4b on CPU takes ~10–60s per answer; the smoke poll budget is 30s and
-  may need a retry on a cold model.
-- `?token=` SSE auth is dev-only (see threat model Phase 3 section).
+- SPA 的浏览器点击走查在 HTTP 层面做了验证(SPA 可访问,API + SSE +
+  认证可用);视觉交互应在 `http://localhost:8000/` 做一次人工抽查。
+- CPU 上的 qwen3:4b 每次回答约 10–60 秒;smoke 轮询预算 30 秒,冷模型
+  时可能需要重试。
+- `?token=` SSE 认证仅限开发(见威胁模型 Phase 3 节)。

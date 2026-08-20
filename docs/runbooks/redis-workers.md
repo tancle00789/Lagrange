@@ -1,14 +1,10 @@
-# Redis Worker Operations
+# Redis Worker 运维
 
-## Runtime contract
+## 运行时约定
 
-The default stream is `pk_agent:jobs` and the consumer group is
-`pk_agent:workers`; replace `pk_agent` with `PK_AGENT_RUNTIME_KEY_PREFIX` when
-configured. Delivery is at least once. A pending entry is healthy while its
-owner refreshes the lease and becomes recoverable after
-`PK_AGENT_WORKER_LEASE_MS`.
+默认 stream 为 `pk_agent:jobs`，消费组为 `pk_agent:workers`；如配置了 `PK_AGENT_RUNTIME_KEY_PREFIX`，则将 `pk_agent` 替换为该前缀。投递语义为至少一次（at-least-once）。只要其所有者持续刷新租约，pending entry 就是健康的；超过 `PK_AGENT_WORKER_LEASE_MS` 后变为可恢复状态。
 
-## Inspect the queue
+## 检查队列
 
 ```bash
 redis-cli XINFO GROUPS pk_agent:jobs
@@ -16,28 +12,20 @@ redis-cli XPENDING pk_agent:jobs pk_agent:workers
 redis-cli XINFO CONSUMERS pk_agent:jobs pk_agent:workers
 ```
 
-Watch `pending`, consumer `idle`, and the oldest pending entry. Sustained
-pending growth or entries older than several lease intervals indicates a
-worker, Redis connectivity, or downstream provider problem.
+关注 `pending`、consumer 的 `idle` 以及最早的 pending entry。pending 持续增长，或 entry 超过多个租约间隔仍未处理，表明存在 worker、Redis 连接或下游 provider 问题。
 
-## Recovery behavior
+## 恢复行为
 
-1. A graceful shutdown changes the task record to `retrying` and leaves its
-   stream entry pending.
-2. A hard crash leaves the task's last status unchanged, usually `running`.
-3. A healthy worker calls `XAUTOCLAIM` after the lease, increments the persisted
-   attempt count, and resumes execution.
-4. A terminal result or durable user cancellation causes `XACK`.
+1. 优雅关闭会将任务记录变为 `retrying`，并保留其 stream entry 为 pending 状态。
+2. 硬崩溃会保持任务的最后状态不变，通常为 `running`。
+3. 健康的 worker 在租约到期后调用 `XAUTOCLAIM`，递增持久化的尝试次数并恢复执行。
+4. 终态结果或持久的用户取消会触发 `XACK`。
 
-Do not manually `XACK` an entry until the corresponding task record has been
-checked. Manual acknowledgement discards its automatic recovery path. If Redis
-is unavailable, task creation fails rather than pretending the job was queued.
+在人工执行 `XACK` 之前，务必先检查对应的任务记录。手动确认会丢弃其自动恢复路径。如果 Redis 不可用，任务创建会失败，而不是假装任务已入队。
 
-## Configuration guidance
+## 配置建议
 
-- Keep the lease comfortably above normal event-loop and Redis latency.
-- Keep the polling interval low enough for acceptable queue pickup latency.
-- Size concurrency for downstream model/provider capacity, not CPU count alone.
-- Treat maximum attempts as an error-budget decision; retries can repeat
-  idempotent reads but external writes require their own idempotency keys.
-
+- 租约应显著高于正常的事件循环与 Redis 延迟。
+- 轮询间隔应足够低，以满足可接受的队列拾取延迟。
+- 并发度应按下游模型/provider 容量来设定，而非仅按 CPU 核数。
+- 将最大尝试次数视为错误预算决策；重试可以重复幂等读取，但外部写入需要自带幂等键。

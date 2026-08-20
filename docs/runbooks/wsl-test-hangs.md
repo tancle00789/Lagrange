@@ -1,52 +1,40 @@
-# WSL Test Hangs Runbook
+# WSL 测试挂起手册
 
-## Symptom
+## 症状
 
-- `fastapi.testclient.TestClient` hangs in `__enter__`, or
-- a LangGraph async test passes its assertions but pytest never advances or
-  exits.
+- `fastapi.testclient.TestClient` 在 `__enter__` 处挂起，或
+- LangGraph 异步测试已通过断言，但 pytest 不再继续或退出。
 
-## Diagnosis
+## 诊断
 
-First test the Python runtime without importing pk-agent:
+首先在不导入 pk-agent 的情况下测试 Python 运行时：
 
 ```bash
 python -c 'import asyncio; asyncio.run(asyncio.to_thread(lambda: 42)); print("done")'
 ```
 
-If `42` is computed but `done` never prints, the environment cannot wake an
-asyncio loop from a worker thread. Starlette TestClient uses an AnyIO blocking
-portal, and LangGraph's in-memory checkpoint path can use the default executor;
-both expose the same environmental limitation.
+如果 `42` 已计算但 `done` 始终未打印，说明该环境无法从工作线程唤醒 asyncio 事件循环。Starlette TestClient 使用 AnyIO blocking portal，LangGraph 的内存 checkpoint 路径可能使用默认 executor；两者暴露了相同的环境限制。
 
-This was reproduced inside the Codex managed WSL sandbox. The same interpreter,
-environment and test suite pass when run in the normal WSL process namespace.
-It is not a pk-agent deadlock and should not be worked around by weakening task
-lifecycle code or adding arbitrary pytest timeouts.
+该问题在 Codex 托管的 WSL 沙箱中可复现。同一解释器、环境与测试套件在正常 WSL 进程命名空间中运行时可通过。这不是 pk-agent 死锁，不应通过弱化任务生命周期代码或添加任意 pytest 超时来解决。
 
-## Resolution
+## 解决
 
-1. Install the locked development dependencies. Starlette 1.3+ TestClient uses
-   `httpx2`; it is explicitly included in the dev group.
+1. 安装锁定的开发依赖。Starlette 1.3+ 的 TestClient 使用 `httpx2`；它已显式包含在 dev 依赖组中。
 
    ```bash
    uv sync --frozen
    ```
 
-2. Run tests from a normal WSL/Windows terminal rather than a restricted
-   container or managed sandbox that blocks cross-thread event-loop wakeups.
+2. 从正常 WSL/Windows 终端运行测试，而不是在会阻塞跨线程事件循环唤醒的受限容器或托管沙箱中运行。
 
    ```bash
    uv run pytest
    ```
 
-3. In Codex, run the pytest command with sandbox escalation. The test itself
-   needs no network access; it only needs normal thread/event-loop semantics.
+3. 在 Codex 中，以沙箱提权方式运行 pytest 命令。测试本身不需要网络访问；它只需要正常的线程/事件循环语义。
 
-## Evidence from the 2026-08-05 incident
+## 2026-08-05 事故证据
 
-- Restricted sandbox: the standard-library `asyncio.to_thread` reproducer
-  returned its value and then hung during event-loop shutdown.
-- Outside the restricted sandbox: the reproducer printed `42` and `done`.
-- After locking `httpx2`, all 80 pk-agent tests passed outside the restricted
-  sandbox without TestClient deprecation warnings.
+- 受限沙箱：标准库 `asyncio.to_thread` 复现器返回值后，在事件循环关闭阶段挂起。
+- 受限沙箱外：复现器打印了 `42` 与 `done`。
+- 锁定 `httpx2` 后，全部 80 个 pk-agent 测试在受限沙箱外通过，且没有 TestClient 弃用警告。

@@ -1,60 +1,40 @@
-# Phase 10 Build Report — Browser and Deployment Verification
+# 阶段 10 构建报告 — 浏览器与部署验证
 
 Date: 2026-08-05
 Status: implementation complete; container runtime verified; host-port verifier pending WSL forwarding
 
-## Scope delivered
+## 交付范围
 
-- Added Playwright and a Chromium task-flow E2E covering token entry, authorized
-  task creation, request payload, refreshed task selection, grounded report and
-  citation rendering.
-- Added frontend production build/E2E scripts and Make targets.
-- Added an application container healthcheck and a deterministic core deployment
-  verifier for health, durable task completion, cross-tenant denial, Redis
-  Streams state, forced PostgreSQL RLS and Prometheus metrics.
-- Added `.dockerignore` after a real build exposed that local virtualenv and
-  frontend dependencies were entering the build context.
-- Pinned the container's `uv` installer and changed the runtime image to a
-  non-root UID with owned application/static files.
-- Added the production readiness checklist and portfolio README.
-- Fixed the production startup path so the tenant-scoped PostgreSQL checkpointer
-  inherits LangGraph's `BaseCheckpointSaver` contract; the app now boots against
-  the real PostgreSQL/Redis core stack.
+- 新增 Playwright 与 Chromium 任务流端到端测试，覆盖 token 录入、授权任务创建、请求载荷、刷新任务选择、 grounded 报告以及引用渲染。
+- 新增前端生产构建/E2E 脚本以及 Make 目标。
+- 新增应用容器健康检查，以及针对健康状态、持久化任务完成、跨租户拒绝、Redis Streams 状态、强制 PostgreSQL RLS 和 Prometheus 指标的确定性核心部署校验器。
+- 新增 `.dockerignore`：实际构建中发现本地 virtualenv 和前端依赖进入了构建上下文。
+- 固定容器内 `uv` 安装程序版本，并将运行时镜像改为非 root UID 并拥有应用/静态文件。
+- 新增生产就绪检查清单与作品集 README。
+- 修复生产启动路径：租户级 PostgreSQL checkpointer 继承 LangGraph 的 `BaseCheckpointSaver` 契约；应用现在可针对真实 PostgreSQL/Redis 核心栈启动。
 
-## Verification completed
+## 已完成验证
 
-| Gate | Result |
+| 门禁 | 结果 |
 |---|---|
-| Frontend `npm run build` | passed, Vite 8.2.0 |
+| 前端 `npm run build` | passed, Vite 8.2.0 |
 | Chromium Playwright E2E | 1 passed |
 | npm audit | 0 vulnerabilities |
 | Compose YAML/config parse | passed |
 | Deployment verifier shell syntax | passed |
-| Core containers after checkpointer fix | app healthy; task completed; cross-tenant read returned 404; Redis group pending=0; 3 forced RLS policies; Prometheus job metric emitted |
+| checkpointer 修复后的核心容器 | app healthy; task completed; cross-tenant read returned 404; Redis group pending=0; 3 forced RLS policies; Prometheus job metric emitted |
 
-## Live deployment incident
+## 线上部署事件
 
-Docker Desktop 28.5.2 initially connected and began pulling/building the core
-stack. After that build was intentionally interrupted to fix the missing
-`.dockerignore`, the Docker Linux engine returned API 500. A clean Desktop
-restart reproduced the failure. Host logs show the `docker-desktop` VM stuck
-waiting for filesystem, `eth0` and metadata readiness, followed by WSL vsock
-timeouts. Even `wsl.exe --terminate docker-desktop` could not cross the failed
-vsock boundary from the current Ubuntu session.
+Docker Desktop 28.5.2 起初连接成功并开始拉取/构建核心栈。在构建被故意中断以修复缺失的 `.dockerignore` 后，Docker Linux 引擎返回 API 500。重启 Desktop 后问题复现。主机日志显示 `docker-desktop` VM 卡在等待文件系统、`eth0` 和元数据就绪，随后出现 WSL vsock 超时。即便从当前 Ubuntu 会话执行 `wsl.exe --terminate docker-desktop` 也无法穿过失败的 vsock 边界。
 
-After restarting Docker Desktop/WSL, the app container and its internal health
-check recovered. The remaining host-side gate is the verifier's access to
-`localhost:8000`: Docker Desktop currently reports the published port through
-its Desktop proxy, while this WSL session cannot reach that proxy even though
-the app is healthy inside the Docker network. The internal-network checks above
-are evidence for the runtime path, but the host-side script is not marked as a
-full pass until the port-forwarding path is restored.
+重启 Docker Desktop/WSL 后，应用容器及其内部健康检查恢复。剩余的主机侧门禁是校验器访问 `localhost:8000`：Docker Desktop 当前通过其 Desktop 代理发布端口，而本 WSL 会话无法到达该代理，尽管应用在 Docker 网络内部是健康的。上述内部网络检查可作为运行时路径的证据，但主机侧脚本在端口转发路径恢复前不会标记为完全通过。
 
-The remaining command is:
+剩余命令：
 
 ```bash
 docker compose up -d --build db redis app
 DOCKER_CMD=docker.exe bash scripts/verify_core_deployment.sh
 ```
 
-No live-container/RLS result is claimed until that command succeeds.
+在该命令成功之前，不声称赞活容器/RLS 结果。

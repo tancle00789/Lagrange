@@ -1,15 +1,15 @@
-# ADR 002: PostgreSQL checkpointing
+# ADR 002:PostgreSQL checkpoint
 
-## Status
-Accepted for Phase 1.
+## 状态
+Phase 1 已采纳。
 
-## Context
-Phase 1 must prove durable run state. The target production stack includes PostgreSQL.
+## 背景
+Phase 1 必须证明运行状态可持久化。目标生产栈包含 PostgreSQL。
 
-## Decision
-Use `langgraph-checkpoint-postgres` with `AsyncPostgresSaver`. `thread_id` is `{tenant_id}:{task_id}`; `checkpoint_ns` comes from `PK_AGENT_CHECKPOINT_NS`.
+## 决策
+使用 `langgraph-checkpoint-postgres` 的 `AsyncPostgresSaver`。`thread_id` 为 `{tenant_id}:{task_id}`;`checkpoint_ns` 来自 `PK_AGENT_CHECKPOINT_NS`。
 
-## Consequences
-- Local tests can still use `InMemorySaver` by setting `PK_AGENT_DATABASE_URL=memory://`.
-- Docker Compose smoke test validates real PostgreSQL checkpoint setup.
-- Production hardening still needs tenant RLS or schema-per-tenant.
+## 影响
+- 本地测试设置 `PK_AGENT_DATABASE_URL=memory://` 仍可使用 `InMemorySaver`。
+- Docker Compose smoke 测试验证真实 PostgreSQL checkpoint 配置。
+- 生产加固仍需租户级 RLS 或按租户分 schema。

@@ -1,94 +1,82 @@
-# ADR 013: Model-Block System — LLM-Planned, Schema-Gated, Executor-Run
+# ADR 013:模型块系统 —— LLM 规划、Schema 门控、Executor 执行
 
-## Status
+## 状态
 
-Accepted (2026-08-10, Phase 5′ / build report phase-11)
+已采纳(2026-08-10,Phase 5′ / 构建报告 phase-11)
 
-## Context
+## 背景
 
-The agent's second core function (per the user's product definition): given a
-natural-language instruction, run pre-registered model blocks (classical ML,
-deep learning, numerical simulations) to support research. The source docx
-has no model-block concept; the applicable constraints are the tool system
-(§13), object storage for large artifacts (§8), small-object Graph State (§7),
-and the sandbox requirements (§18).
+agent 的第二大核心职能(按用户的产品定义):给定自然语言指令,运行
+预注册的模型块(经典机器学习、深度学习、数值模拟)来支撑研究。源
+docx 没有模型块概念;适用的约束来自工具系统(§13)、大产物的对象
+存储(§8)、小对象图 State(§7)与沙箱要求(§18)。
 
-Key tensions:
+关键张力:
 
-- The user wants the LLM to decide *whether and which* block to run — but an
-  LLM must never be able to inject arbitrary code or unbounded workloads.
-- Blocks need sklearn/torch (heavy deps, GPU) which must not bloat or slow the
-  API image.
-- Trained models and curves are large binary artifacts that must not enter
-  Graph State or the checkpoint database.
+- 用户希望由 LLM 决定*是否以及运行哪个*块 —— 但 LLM 绝不能注入任意
+  代码或无界负载。
+- 块依赖 sklearn/torch(重依赖、GPU),不能让 API 镜像膨胀或变慢。
+- 训练出的模型与曲线是大体积二进制产物,绝不能进入图 State 或
+  checkpoint 数据库。
 
-## Decision
+## 决策
 
-1. **LLM-autonomous planning behind a schema gate.** A `plan_model_calls`
-   graph node (capability `"plan"`) asks the LLM for strict JSON
-   `{model_calls: [{block_name, params}]}`. The node validates every call
-   like a citation gate: block must be registered in `ModelBlockRegistry`,
-   params must pass that block's Pydantic schema (`extra="forbid"`), and at
-   most `model_block_max_calls` (default 2) calls survive. Invalid calls are
-   dropped and recorded in `model_error`. The plan prompt carries the catalog
-   (names, descriptions, param types) but not user-controlled code.
-2. **Execution via a ToolRegistry L2 tool in a dedicated executor container.**
-   Validated calls go through the tool `model_block_run` (risk L2, no
-   auto-retry). The API-side handler re-validates the block schema (the
-   graph's plan is not trusted), XADDs a `ModelRunRequest` to the Redis
-   stream `{prefix}:modelruns`, and awaits the result (pubsub + 1s polling
-   fallback) up to `model_block_timeout_seconds`. The executor service
-   (same codebase, `pk-agent-executor` entry, consumer group on the stream)
-   runs the block, uploads artifacts, and publishes `ModelRunResult`.
-   - **Why a persistent executor rather than §18-style per-task sandboxes:**
-     §18 targets *arbitrary untrusted code*. Blocks are pre-registered,
-     trusted, reviewed code with strictly validated params — there is no code
-     injection surface. A persistent executor with container-level resource
-     limits (`cpus`, `mem_limit`, GPU reservation) gives the same blast-radius
-     control without per-run container startup cost. This is a deliberate,
-     documented relaxation; any future *user-supplied code* feature must use
-     the full §18 sandbox instead.
-3. **MinIO for artifacts, ids only in State.** `ArtifactStore` protocol with
-   `MinioArtifactStore` (minio SDK in `asyncio.to_thread`) and
-   `LocalArtifactStore` (dev/tests). Artifact keys are
-   `{tenant_id}/{task_id}/{run_id}-{filename}` — the tenant prefix is the
-   authorization boundary enforced by `GET /api/v1/artifacts/{id}`. Graph
-   State stores only `run_id`, block name, small metrics dict, and artifact
-   ids. The answer prompt receives completed runs' metrics in a trusted
-   "Simulation results" section; failed runs are excluded from the prompt but
-   kept in state for the UI.
-4. **Degradation over failure.** Planning is skipped (empty calls) when no
-   planner model is registered, the registry is absent, or the LLM output is
-   unparseable. A failed run records `model_error` and the task continues to
-   answer generation (same spirit as ADR 006 external-source degradation).
-5. **Heavy deps isolated to the executor image.** sklearn/torch live in a uv
-   `executor` dependency group installed only in the Dockerfile `executor`
-   target (and dev for tests). The API image stays slim. The PyPI torch wheel
-   bundles the CUDA runtime, so GPU passthrough works without a custom index;
-   `TORCH_EXTRA_INDEX` remains as a build ARG fallback. The torch block caps
-   CUDA memory at 50% (`set_per_process_memory_fraction`) so a run cannot
-   starve the host GPU.
+1. **LLM 自主规划,置于 schema 门之后。** `plan_model_calls` 图节点
+   (能力 `"plan"`)向 LLM 索要严格 JSON
+   `{model_calls: [{block_name, params}]}`。节点像引用门一样校验每次
+   调用:块必须在 `ModelBlockRegistry` 中注册,params 必须通过该块的
+   Pydantic schema(`extra="forbid"`),且至多保留
+   `model_block_max_calls`(默认 2)次调用。非法调用被丢弃并记入
+   `model_error`。规划 prompt 携带目录(名称、描述、参数类型),但不
+   含任何用户控制的代码。
+2. **经 ToolRegistry L2 工具在专用 executor 容器中执行。** 校验过的
+   调用走工具 `model_block_run`(风险 L2,不自动重试)。API 侧 handler
+   再次校验块 schema(图的规划不被信任),把 `ModelRunRequest` XADD
+   到 Redis stream `{prefix}:modelruns`,并在
+   `model_block_timeout_seconds` 内等待结果(pubsub + 1 秒轮询兜底)。
+   executor 服务(同一代码库,`pk-agent-executor` 入口,stream 上的
+   消费者组)运行块、上传产物并发布 `ModelRunResult`。
+   - **为什么用常驻 executor 而不是 §18 式按任务沙箱:** §18 针对的是
+     *任意不可信代码*。块是预注册的、受信任的、经过评审的代码,参数
+     严格校验 —— 不存在代码注入面。带容器级资源限制(`cpus`、
+     `mem_limit`、GPU 预留)的常驻 executor 提供同样的爆炸半径控制,
+     且没有每次运行启动容器的开销。这是有意的、记录在案的放松;任何
+     未来的*用户提交代码*功能必须使用完整的 §18 沙箱。
+3. **产物进 MinIO,State 只存 id。** `ArtifactStore` 协议有两个实现:
+   `MinioArtifactStore`(minio SDK 包在 `asyncio.to_thread` 中)与
+   `LocalArtifactStore`(开发/测试)。产物 key 为
+   `{tenant_id}/{task_id}/{run_id}-{filename}` —— 租户前缀即
+   `GET /api/v1/artifacts/{id}` 强制的授权边界。图 State 只存
+   `run_id`、块名、小体量指标 dict 与产物 id。回答 prompt 以受信任的
+   "Simulation results" 段接收已完成运行的指标;失败的运行不进 prompt
+   但保留在 state 中供 UI 展示。
+4. **降级优于失败。** 当没有注册 planner 模型、registry 缺席或 LLM
+   输出不可解析时,跳过规划(空调用)。运行失败记入 `model_error`,
+   任务继续走向回答生成(与 ADR 006 外部源降级同一精神)。
+5. **重依赖隔离在 executor 镜像。** sklearn/torch 位于 uv 的 `executor`
+   依赖组,只在 Dockerfile 的 `executor` target(以及跑测试的 dev)
+   中安装。API 镜像保持精简。PyPI 的 torch wheel 自带 CUDA 运行时,
+   GPU 透传无需自定义 index;`TORCH_EXTRA_INDEX` 保留为构建 ARG 兜底。
+   torch 块把 CUDA 显存限制在 50%
+   (`set_per_process_memory_fraction`),单次运行不会饿死宿主 GPU。
 
-## First three blocks
+## 首批三个块
 
-- `sklearn_tabular` — logistic/RF classification & regression on inline JSON
-  rows (≤2000×51) or synthetic demo data; joblib model artifact.
-- `torch_mlp` — configurable MLP (layers/epochs/lr/batch), CUDA if available,
-  loss-curve JSON + weights artifacts.
-- `kv_cache_sim` — dependency-free KV-cache memory/quality trade-off curves
-  across compression ratios (supports the user's KV-cache research).
+- `sklearn_tabular` —— 对内联 JSON 行(≤2000×51)或合成演示数据做
+  logistic/随机森林分类与回归;产物为 joblib 模型。
+- `torch_mlp` —— 可配置 MLP(层数/epoch/lr/batch),有 CUDA 则用
+  CUDA;产物为 loss 曲线 JSON + 权重。
+- `kv_cache_sim` —— 零依赖的 KV-cache 显存/质量权衡曲线,跨压缩比
+  扫描(支撑用户的 KV-cache 研究)。
 
-## Consequences
+## 影响
 
-- LLM can trigger GPU/CPU-heavy work: bounded by schema validation, max 2
-  calls per task, per-block runtime caps, tool-level timeout, and container
-  resource limits. Budget accounting charges plan (+1) and each run (+1)
-  against `model_budget_max_calls`.
-- A timed-out run is never auto-retried (`max_retries=0`) because executor
-  side effects (artifacts) are not idempotent; the Redis stream retains the
-  request for operator inspection.
-- fakeredis ignores stream block timeouts: the worker sleeps `block_ms` on
-  empty reads so tests (and any non-blocking client) cannot busy-spin.
-- Compose adds `executor` (GPU reservation, 4 CPU / 8 GiB caps) and `minio`
-  services; deployment verification requires Docker Desktop with WSL2 GPU
-  support.
+- LLM 可以触发 GPU/CPU 重负载:由 schema 校验、每任务至多 2 次调用、
+  每块运行时上限、工具级超时与容器资源限制共同约束。预算记账把规划
+  (+1)与每次运行(+1)计入 `model_budget_max_calls`。
+- 超时的运行绝不自动重试(`max_retries=0`),因为 executor 副作用
+  (产物)不是幂等的;Redis stream 保留该请求供运维检查。
+- fakeredis 忽略 stream 阻塞读的超时:worker 在空读时 sleep
+  `block_ms`,测试(以及任何非阻塞客户端)不会忙等空转。
+- Compose 增加 `executor`(GPU 预留,4 CPU / 8 GiB 上限)与 `minio`
+  服务;部署验证要求带 WSL2 GPU 支持的 Docker Desktop。

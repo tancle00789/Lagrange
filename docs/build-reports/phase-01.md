@@ -1,15 +1,15 @@
-# Phase 01 Build Report
+# Phase 01 构建报告
 
-## Delivered
-- Echo LangGraph: `START -> init -> echo -> finalize -> END`
-- AgentOS/FastAPI task API with auth, rate limit, idempotency, SSE events, resume, cancel
-- PostgreSQL checkpointer factory with in-memory fallback for tests
-- Harness skeleton: ModelRouter, ToolRegistry, SkillRegistry, PromptAssembler, AgentEventBus
-- KnowledgeProvider protocol and WeKnora client skeleton
-- Unit/integration tests using FakeModel only
+## 已交付
+- Echo LangGraph：`START -> init -> echo -> finalize -> END`
+- 带身份验证、限流、幂等、SSE 事件、恢复、取消的 AgentOS/FastAPI 任务 API
+- 带内存回退的 PostgreSQL checkpointer factory，用于测试
+- Harness 骨架：ModelRouter、ToolRegistry、SkillRegistry、PromptAssembler、AgentEventBus
+- KnowledgeProvider 协议与 WeKnora 客户端骨架
+- 仅使用 FakeModel 的单元/集成测试
 
-## Verification
-Passed locally and in Docker Compose:
+## 验证
+本地与 Docker Compose 中通过：
 
 ```bash
 uv sync --frozen
@@ -20,4 +20,4 @@ docker compose up -d --build
 bash scripts/smoke_test.sh http://localhost:8000  # smoke ok
 ```
 
-Smoke test created a task through the FastAPI control plane and verified it reached `completed` using the FakeModel echo path.
+Smoke test 通过 FastAPI 控制平面创建了一个任务，并验证它通过 FakeModel echo 路径到达 `completed`。
