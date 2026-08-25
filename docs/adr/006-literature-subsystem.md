@@ -21,7 +21,7 @@ API)与 Science 系元数据(CrossRef)抓取文献,以其为依据生成回答,�
    小记录契约外,绝不写图 state。
 
 2. **默认仅元数据(版权边界)。**
-   `LiteratureRecord` 携带标题/作者/摘要(≤800 字符)/URL/doi/出处/
+   `LiteratureRecord` 携带标题/作者/摘要(≤2000 字符)/URL/doi/出处/
    发表时间 —— 绝不含全文。仅当任务显式设置 `ingest_external=true` 时,
    才经 `literature_ingest` 工具(风险 L2,每任务 ≤2 个 PDF,每个 ≤25MB,
    校验 content-type,SSRF 主机白名单,重定向逐跳重验)下载并灌入

@@ -222,7 +222,7 @@ export default function TaskDetail({ task, onChanged }: Props) {
       {report && (
         <div className="panel">
           <h2>报告</h2>
-          <p>{report.answer}</p>
+          <p className="answer">{report.answer}</p>
           <p>
             有据可依：{" "}
             <span className={report.grounded ? "grounded-yes" : "grounded-no"}>

@@ -19,11 +19,15 @@ class OllamaModel:
         base_url: str,
         model: str,
         *,
-        timeout_seconds: float = 60.0,
+        timeout_seconds: float = 120.0,
+        num_predict: int = 4096,
+        num_ctx: int = 16384,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.num_predict = num_predict
+        self.num_ctx = num_ctx
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(
             base_url=self.base_url, timeout=httpx.Timeout(timeout_seconds)
@@ -42,6 +46,9 @@ class OllamaModel:
             # traces (qwen3 etc.) must not leak into it. Ignored by models
             # without thinking support.
             "think": False,
+            # Bound generation length and context so detailed answers fit and
+            # latency stays predictable on a single local GPU.
+            "options": {"num_predict": self.num_predict, "num_ctx": self.num_ctx},
         }
         last_error: Exception | None = None
         for attempt in (1, 2):

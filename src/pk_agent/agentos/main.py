@@ -111,6 +111,8 @@ def _build_answer_model(settings: Settings) -> Model:
             settings.ollama_base_url,
             settings.ollama_chat_model,
             timeout_seconds=settings.ollama_timeout_seconds,
+            num_predict=settings.ollama_num_predict,
+            num_ctx=settings.ollama_num_ctx,
         )
     return FakeModel()
 
@@ -367,6 +369,7 @@ def create_app(
             ),
             model_block_max_calls=settings.model_block_max_calls,
             skill_registry=skill_registry,
+            retrieval_top_k=settings.retrieval_top_k,
         )
         if job_queue is not None:
             await job_queue.start(lambda job: execute_job(app, job))

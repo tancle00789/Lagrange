@@ -157,6 +157,6 @@ def test_parse_model_output_falls_back_to_plain_text() -> None:
 
 
 def test_parse_model_output_truncates_claim_text() -> None:
-    raw = json.dumps({"answer": "a", "claims": [{"text": "x" * 400, "chunk_ids": ["c1"]}]})
+    raw = json.dumps({"answer": "a", "claims": [{"text": "x" * 800, "chunk_ids": ["c1"]}]})
     _, claims = _parse_model_output(raw)
-    assert len(claims[0].text) == 300
+    assert len(claims[0].text) == 600

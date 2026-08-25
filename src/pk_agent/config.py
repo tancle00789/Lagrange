@@ -44,11 +44,14 @@ class Settings(BaseSettings):
     weknora_max_retries: int = 3
     weknora_default_kb_id: str | None = None
     weknora_tenant_kb_map: str = ""
-    weknora_snippet_max_chars: int = 500
+    weknora_snippet_max_chars: int = 1500
+    retrieval_top_k: int = 10
 
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_chat_model: str | None = None
-    ollama_timeout_seconds: float = 60.0
+    ollama_timeout_seconds: float = 120.0
+    ollama_num_predict: int = 4096
+    ollama_num_ctx: int = 16384
 
     arxiv_base_url: str = "https://export.arxiv.org"
     github_api_base_url: str = "https://api.github.com"
@@ -60,7 +63,7 @@ class Settings(BaseSettings):
     external_http_timeout: float = 15.0
     external_max_retries: int = 2
     external_max_results: int = 5
-    literature_abstract_max_chars: int = 800
+    literature_abstract_max_chars: int = 2000
     literature_pdf_max_bytes: int = 25_000_000
 
     model_blocks_enabled: bool = True

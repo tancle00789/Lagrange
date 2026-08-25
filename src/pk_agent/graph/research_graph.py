@@ -20,7 +20,7 @@ from pk_agent.providers.errors import KnowledgeTimeout, KnowledgeUnavailable
 from pk_agent.skills.prompts import format_approved_procedures
 from pk_agent.skills.registry import SkillRegistry
 
-CLAIM_TEXT_MAX_CHARS = 300
+CLAIM_TEXT_MAX_CHARS = 600
 QUERY_MAX_CHARS = 1000
 EXTERNAL_MIN_HITS = 3
 EXTERNAL_MAX_SOURCES = 8
@@ -93,6 +93,7 @@ def build_research_graph(
     model_block_registry: ModelBlockRegistry | None = None,
     model_block_max_calls: int = 2,
     skill_registry: SkillRegistry | None = None,
+    retrieval_top_k: int = 10,
 ):
     prompt_assembler = PromptAssembler()
 
@@ -133,7 +134,7 @@ def build_research_graph(
         task_id = state["task_id"]
         try:
             hits = await knowledge_provider.search(
-                state["normalized_query"], tenant_id=state["tenant_id"], limit=5
+                state["normalized_query"], tenant_id=state["tenant_id"], limit=retrieval_top_k
             )
         except (KnowledgeUnavailable, KnowledgeTimeout) as exc:
             # ADR 004: retrieval outage degrades to empty context; auth errors

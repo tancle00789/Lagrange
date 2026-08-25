@@ -21,7 +21,7 @@ WeKnora 作为**受控子系统**运行在我们的 docker-compose 栈内:
 - **契约边界**:`providers/weknora.py` 把原始 JSON 映射为 Pydantic 契约
   模型(`providers/contract.py`)。LangGraph 节点只会看到
   `KnowledgeHit`/`KnowledgeChunk`。片段在 provider 内截断
-  (`weknora_snippet_max_chars`,默认 500),state 无法收到完整文档。
+  (`weknora_snippet_max_chars`,默认 1500),state 无法收到完整文档。
 - **租户映射**:pk_agent 的 `tenant_id` 经 `weknora_tenant_kb_map` 1:1
   映射到 WeKnora 知识库,以 `weknora_default_kb_id` 兜底。不存在跨租户
   回退;未映射的租户直接报硬错误 `KnowledgeBadRequest`。

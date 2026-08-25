@@ -306,3 +306,8 @@ button:disabled {
 .gate .panel {
   width: 420px;
 }
+
+p.answer {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
